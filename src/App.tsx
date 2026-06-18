@@ -90,7 +90,7 @@ export default function App() {
               }`}
             >
               <Activity className="w-4 h-4 text-[#3b82f6]" />
-              Operational AI Dashboard
+              Sim Teacher RCA/OPS Dashboard
             </button>
 
             <button
