@@ -688,11 +688,13 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       const w = row.week_beginning;
       if (w !== reasonMatrixWeekFilter) return;
 
+      const qcTypeValue = String(row.qc_error_type || "").trim();
+      if (qcTypeValue === "" || qcTypeValue.toLowerCase() === "none") return;
+
       const ctrl = getQcTypeBucket(row.qc_error_type);
-      if (!ctrl) return;
       if (stqcErrorTypeFilter !== "All" && ctrl !== stqcErrorTypeFilter) return;
 
-      const reason = row.qc_error_type;
+      const reason = row.failureReason;
       const loc = row.stqc_location;
 
       if (reason && reason !== "None" && loc) {
