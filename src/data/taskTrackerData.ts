@@ -5,6 +5,7 @@ export interface TaskTrackerRow {
   batch_id: string;
   driving_seq: string;
   location: string;
+  stqc_location?: string;
   
   // V2 First-Pass Data
   simteacher_v2_labeler: string;

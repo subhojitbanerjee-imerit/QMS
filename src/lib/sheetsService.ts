@@ -10,7 +10,7 @@ const HEADER_KEY_ALIASE_MAP: Record<string, string[]> = {
   video_task_id: ["video_task_id", "videotaskid", "video task id", "video_id", "video task"],
   batch_id: ["batch_id", "batchid", "batch id", "batch"],
   driving_seq: ["driving_seq", "drivingseq", "driving sequence", "sequence", "driving_seq_id"],
-  location: ["stqc location", "stqc_location", "location", "site", "center", "geographic center"],
+  location: ["location", "v2 location", "v2_location", "site", "center", "geographic center"],
   simteacher_v2_labeler: ["simteacher_v2_labeler", "v2_labeler", "labeler", "labeler_id", "v2 labeler", "contributor"],
   v2_task_status: ["v2_task_status", "v2 status", "status", "v2_status", "v2_task_status_name"],
   v2_task_status_final: ["v2_task_status_final", "v2 final", "final status", "v2_final_status"],
@@ -228,6 +228,7 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
         batch_id: "",
         driving_seq: "",
         location: "",
+        stqc_location: "",
         simteacher_v2_labeler: "",
         v2_task_status: "",
         v2_task_status_final: "",
@@ -286,7 +287,7 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
         }
       });
 
-      // 2. Strict Absolute Column-letter Index overrides to ensure production compliance (Col AO, AB, AA, AF, AG, P, AH, O)
+      // 2. Strict Absolute Column-letter Index overrides to ensure production compliance (Col AM, AO, AB, AA, AF, AG, P, AH, O)
       // O -> STQC Auditor ID (Index 14)
       if (row.length > 14 && row[14] !== undefined && row[14] !== "") {
         const valueO = String(row[14]).trim();
@@ -306,9 +307,14 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
         }
       }
 
-      // AO -> STQC Location (Index 40). This is the canonical location for dashboard analytics.
+      // AM -> V2 Location (Index 38)
+      if (row.length > 38 && row[38] !== undefined && row[38] !== "") {
+        parsedRow.location = String(row[38]).trim();
+      }
+
+      // AO -> STQC Location (Index 40)
       if (row.length > 40 && row[40] !== undefined && row[40] !== "") {
-        parsedRow.location = String(row[40]).trim();
+        parsedRow.stqc_location = String(row[40]).trim();
       }
       // AB -> V2 Cohort (Index 27)
       if (row.length > 27 && row[27] !== undefined && row[27] !== "") {

@@ -92,7 +92,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   // Sync locations to parent header when data loads
   useEffect(() => {
     if (taskData.length > 0 && onLocationsUpdate) {
-      const uniqueLocs = Array.from(new Set(taskData.map(d => d.location).filter(l => l && l.trim() !== ""))) as string[];
+      const uniqueLocs = Array.from(new Set(
+        taskData
+          .flatMap(d => [d.location, d.stqc_location])
+          .filter(l => l && String(l).trim() !== "")
+      )) as string[];
       if (uniqueLocs.length > 0) {
         onLocationsUpdate(uniqueLocs);
       }
@@ -272,8 +276,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
   // Compute live options dynamically from the loaded dataset for 100% fidelity and zero hardcoding!
   const uniqueLocations = useMemo(() => {
-    const list = taskData.map(d => d.location).filter(Boolean).map(s => String(s).trim());
+    const list = taskData
+      .flatMap(d => [d.location, d.stqc_location])
+      .filter(Boolean)
+      .map(s => String(s).trim());
     return ["All", ...Array.from(new Set(list))].sort();
+  }, [taskData]);
+
+  const uniqueV2Locations = useMemo(() => {
+    const list = taskData.map(d => d.location).filter(Boolean).map(s => String(s).trim());
+    return Array.from(new Set(list)).sort();
+  }, [taskData]);
+
+  const uniqueStqcLocations = useMemo(() => {
+    const list = taskData.map(d => d.stqc_location).filter(Boolean).map(s => String(s).trim());
+    return Array.from(new Set(list)).sort();
   }, [taskData]);
 
   const uniqueCohorts = useMemo(() => {
@@ -309,7 +326,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   // Filter raw dataset based on fully custom metrics
   const rawFilteredData = useMemo(() => {
     return taskData.filter((row) => {
-      if (selectedLocation !== "All" && row.location !== selectedLocation) return false;
+      if (selectedLocation !== "All" && row.location !== selectedLocation && row.stqc_location !== selectedLocation) return false;
       if (selectedCohort !== "All" && row.v2_cohort !== selectedCohort) return false;
       if (selectedCohortStqc !== "All" && row.stqc_cohort !== selectedCohortStqc) return false;
       if (selectedTL !== "All" && row.v2_tl !== selectedTL) return false;
@@ -526,7 +543,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     const sortedWeeks = rawWeeks.sort((a, b) => new Date(a as string).getTime() - new Date(b as string).getTime());
     const displayWeeks = sortedWeeks.slice(-6);
 
-    const locations = Array.from(new Set(taskData.map(d => d.location).filter(Boolean))).sort();
+    const v2Locations = Array.from(new Set(taskData.map(d => d.location).filter(Boolean))).sort();
+    const stqcLocations = Array.from(new Set(taskData.map(d => d.stqc_location).filter(Boolean))).sort();
     
     // V2 TLS
     const v2tls = Array.from(new Set(taskData.map(d => d.v2_tl).filter(Boolean))).sort();
@@ -549,7 +567,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
     filteredData.forEach(row => {
       const w = row.week_beginning;
-      const loc = row.location;
+      const v2Loc = row.location;
+      const stqcLoc = row.stqc_location;
       const v2tl = row.v2_tl;
       const stqcTl = row.stqc_tl;
       
@@ -568,11 +587,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (!w) return;
 
       // V2 Logic
-      if (loc && v2ReasonActual && v2ReasonActual !== "None" && (v2_ctrl === "Controllable" || v2_ctrl === "Uncontrollable")) {
-        if (!locWeeklyV2[loc]) locWeeklyV2[loc] = {};
-        if (!locWeeklyV2[loc][w]) locWeeklyV2[loc][w] = { total: 0, controllable: 0 };
-        locWeeklyV2[loc][w].total++;
-        if (v2_ctrl === "Controllable") locWeeklyV2[loc][w].controllable++;
+      if (v2Loc && v2ReasonActual && v2ReasonActual !== "None" && (v2_ctrl === "Controllable" || v2_ctrl === "Uncontrollable")) {
+        if (!locWeeklyV2[v2Loc]) locWeeklyV2[v2Loc] = {};
+        if (!locWeeklyV2[v2Loc][w]) locWeeklyV2[v2Loc][w] = { total: 0, controllable: 0 };
+        locWeeklyV2[v2Loc][w].total++;
+        if (v2_ctrl === "Controllable") locWeeklyV2[v2Loc][w].controllable++;
 
         if (!weeklyGrandTotalsV2[w]) weeklyGrandTotalsV2[w] = { total: 0, controllable: 0 };
         weeklyGrandTotalsV2[w].total++;
@@ -584,22 +603,22 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         tlWeeklyV2[v2tl][w].total++;
         if (v2_ctrl === "Controllable") tlWeeklyV2[v2tl][w].controllable++;
       }
-      if (v2ReasonActual && v2ReasonActual !== "None" && loc && displayWeeks.includes(w)) {
+      if (v2ReasonActual && v2ReasonActual !== "None" && v2Loc && displayWeeks.includes(w)) {
         if (!reasonMatrixV2[w]) reasonMatrixV2[w] = {};
         if (!reasonMatrixV2[w][v2ReasonActual]) reasonMatrixV2[w][v2ReasonActual] = {};
-        if (!reasonMatrixV2[w][v2ReasonActual][loc]) reasonMatrixV2[w][v2ReasonActual][loc] = 0;
+        if (!reasonMatrixV2[w][v2ReasonActual][v2Loc]) reasonMatrixV2[w][v2ReasonActual][v2Loc] = 0;
         if (!reasonMatrixTotalsV2[w]) reasonMatrixTotalsV2[w] = {};
         if (!reasonMatrixTotalsV2[w][v2ReasonActual]) reasonMatrixTotalsV2[w][v2ReasonActual] = 0;
-        reasonMatrixV2[w][v2ReasonActual][loc]++;
+        reasonMatrixV2[w][v2ReasonActual][v2Loc]++;
         reasonMatrixTotalsV2[w][v2ReasonActual]++;
       }
 
       // STQC Logic
-      if (loc && stqcReason && stqcReason !== "None" && (stqc_ctrl === "Controllable" || stqc_ctrl === "Uncontrollable")) {
-        if (!locWeeklyStqc[loc]) locWeeklyStqc[loc] = {};
-        if (!locWeeklyStqc[loc][w]) locWeeklyStqc[loc][w] = { total: 0, controllable: 0 };
-        locWeeklyStqc[loc][w].total++;
-        if (stqc_ctrl === "Controllable") locWeeklyStqc[loc][w].controllable++;
+      if (stqcLoc && stqcReason && stqcReason !== "None" && (stqc_ctrl === "Controllable" || stqc_ctrl === "Uncontrollable")) {
+        if (!locWeeklyStqc[stqcLoc]) locWeeklyStqc[stqcLoc] = {};
+        if (!locWeeklyStqc[stqcLoc][w]) locWeeklyStqc[stqcLoc][w] = { total: 0, controllable: 0 };
+        locWeeklyStqc[stqcLoc][w].total++;
+        if (stqc_ctrl === "Controllable") locWeeklyStqc[stqcLoc][w].controllable++;
 
         if (!weeklyGrandTotalsStqc[w]) weeklyGrandTotalsStqc[w] = { total: 0, controllable: 0 };
         weeklyGrandTotalsStqc[w].total++;
@@ -611,20 +630,22 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         tlWeeklyStqc[stqcTl][w].total++;
         if (stqc_ctrl === "Controllable") tlWeeklyStqc[stqcTl][w].controllable++;
       }
-      if (stqcReason && stqcReason !== "None" && loc && displayWeeks.includes(w)) {
+      if (stqcReason && stqcReason !== "None" && stqcLoc && displayWeeks.includes(w)) {
         if (!reasonMatrixStqc[w]) reasonMatrixStqc[w] = {};
         if (!reasonMatrixStqc[w][stqcReason]) reasonMatrixStqc[w][stqcReason] = {};
-        if (!reasonMatrixStqc[w][stqcReason][loc]) reasonMatrixStqc[w][stqcReason][loc] = 0;
+        if (!reasonMatrixStqc[w][stqcReason][stqcLoc]) reasonMatrixStqc[w][stqcReason][stqcLoc] = 0;
         if (!reasonMatrixTotalsStqc[w]) reasonMatrixTotalsStqc[w] = {};
         if (!reasonMatrixTotalsStqc[w][stqcReason]) reasonMatrixTotalsStqc[w][stqcReason] = 0;
-        reasonMatrixStqc[w][stqcReason][loc]++;
+        reasonMatrixStqc[w][stqcReason][stqcLoc]++;
         reasonMatrixTotalsStqc[w][stqcReason]++;
       }
     });
 
     return { 
       displayWeeks, 
-      locations, 
+      v2Locations,
+      stqcLocations,
+      locations: Array.from(new Set([...v2Locations, ...stqcLocations])).sort(), 
       v2: { 
         tls: v2tls, 
         locWeekly: locWeeklyV2, 
@@ -659,7 +680,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (stqcErrorTypeFilter !== "All" && ctrl !== stqcErrorTypeFilter) return;
 
       const reason = row.failureReason;
-      const loc = row.location;
+      const loc = row.stqc_location;
 
       if (reason && reason !== "None" && loc) {
         if (!matrix[reason]) matrix[reason] = {};
@@ -1024,7 +1045,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   }, [qcAuditorsSummary, distSortConfig]);
 
   const locationDistributionRowsV2 = useMemo(() => {
-    const locations = uniqueLocations.filter(loc => loc !== "All");
+    const locations = uniqueV2Locations;
     const rows = locations.map((loc) => {
       const cityLabelers = labelersSummary.filter(l => {
         const matchingTasks = filteredData.filter(d => d.simteacher_v2_labeler === l.labelerId);
@@ -1061,14 +1082,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       rows.sort((a, b) => (b.sub50 + b.b50_70) - (a.sub50 + a.b50_70));
     }
     return rows;
-  }, [labelersSummary, distSortConfig, filteredData, uniqueLocations]);
+  }, [labelersSummary, distSortConfig, filteredData, uniqueV2Locations]);
 
   const locationDistributionRowsQC = useMemo(() => {
-    const locations = uniqueLocations.filter(loc => loc !== "All");
+    const locations = uniqueStqcLocations;
     const rows = locations.map((loc) => {
       const cityLabelers = qcAuditorsSummary.filter(l => {
         const matchingTasks = filteredData.filter(d => d.qa_user_id === l.auditorId);
-        return matchingTasks.length > 0 && matchingTasks[0].location === loc;
+        return matchingTasks.length > 0 && matchingTasks[0].stqc_location === loc;
       });
       let sub50 = 0, b50_70 = 0, b70_80 = 0, b80_85 = 0, b85 = 0;
       cityLabelers.forEach(l => {
@@ -1101,7 +1122,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       rows.sort((a, b) => (b.sub50 + b.b50_70) - (a.sub50 + a.b50_70));
     }
     return rows;
-  }, [qcAuditorsSummary, distSortConfig, filteredData, uniqueLocations]);
+  }, [qcAuditorsSummary, distSortConfig, filteredData, uniqueStqcLocations]);
 
   // Controllable vs Uncontrollable chart data
   const v2ControllablePieData = useMemo(() => {
@@ -1429,6 +1450,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       const isSpecialAB = colLetter === "AB";
                       const isSpecialAF = colLetter === "AF";
                       const isSpecialP = colLetter === "P";
+                      const isSpecialAM = colLetter === "AM";
                       const isSpecialAO = colLetter === "AO";
                       
                       let highlightClass = "bg-white border-slate-200 text-slate-700";
@@ -1455,6 +1477,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       } else if (isSpecialAH) {
                         highlightClass = "bg-rose-50 border-rose-200 text-rose-905 font-medium";
                         badge = "QC ERROR CATEGORY (Col AH)";
+                      } else if (isSpecialAM) {
+                        highlightClass = "bg-cyan-50 border-cyan-200 text-cyan-905 font-medium";
+                        badge = "V2 LOCATION (Col AM)";
                       } else if (isSpecialAO) {
                         highlightClass = "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-905 font-medium";
                         badge = "STQC LOCATION (Col AO)";
@@ -1631,9 +1656,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-              {/* STQC LOCATION */}
+              {/* V2 / STQC LOCATION */}
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">STQC LOCATION (Col AO)</label>
+                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LOCATION FILTER (V2 AM / STQC AO)</label>
                 <select
                   value={selectedLocation}
                   onChange={(e) => setSelectedLocation(e.target.value)}
@@ -1641,7 +1666,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   id="location-filter"
                 >
                   {uniqueLocations.map(l => (
-                    <option key={l} value={l}>{l === "All" ? "All STQC Locations (Col AO)" : `Col AO: ${l}`}</option>
+                    <option key={l} value={l}>{l === "All" ? "All V2/STQC Locations" : l}</option>
                   ))}
                 </select>
               </div>
@@ -3234,7 +3259,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                         </tr>
                       </thead>
                       <tbody>
-                        {advancedAnalytics.locations.map(loc => {
+                        {advancedAnalytics.v2Locations.map(loc => {
                           const data = advancedAnalytics.v2.locWeekly[loc]?.[reasonMatrixWeekFilter];
                           const gTotal = advancedAnalytics.v2.grandTotals[reasonMatrixWeekFilter];
                           
@@ -3280,7 +3305,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                         </tr>
                       </thead>
                       <tbody>
-                        {advancedAnalytics.locations.map(loc => {
+                        {advancedAnalytics.stqcLocations.map(loc => {
                           const data = advancedAnalytics.stqc.locWeekly[loc]?.[reasonMatrixWeekFilter];
                           const gTotal = advancedAnalytics.stqc.grandTotals[reasonMatrixWeekFilter];
                           
@@ -3480,7 +3505,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             </tr>
                           </thead>
                           <tbody>
-                            {advancedAnalytics.locations.map(loc => {
+                            {advancedAnalytics.v2Locations.map(loc => {
                               return (
                                 <tr key={loc} className="hover:bg-slate-50 border-b border-slate-100 transition-colors">
                                   <td className="p-4 font-extrabold bg-white sticky left-0 z-10 border-r border-slate-200">{loc}</td>
@@ -3571,7 +3596,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             </tr>
                           </thead>
                           <tbody>
-                            {advancedAnalytics.locations.map(loc => {
+                            {advancedAnalytics.stqcLocations.map(loc => {
                               return (
                                 <tr key={loc} className="hover:bg-slate-50 border-b border-slate-100 transition-colors">
                                   <td className="p-4 font-extrabold bg-white sticky left-0 z-10 border-r border-slate-200">{loc}</td>
