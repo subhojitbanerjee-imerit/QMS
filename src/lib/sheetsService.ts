@@ -252,7 +252,7 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
         qc_error_category: "",
         qc_error_type: "",
         auditor: "",
-        nuro_findings: "Accepted",
+        nuro_findings: "",
         nuro_note: "",
         nuro_review_date: "",
         is_controllable: true,

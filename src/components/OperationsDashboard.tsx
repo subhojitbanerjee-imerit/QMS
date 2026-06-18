@@ -412,6 +412,27 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     return getOperationalMetrics(filteredData);
   }, [filteredData]);
 
+  const auditClientAgreement = useMemo(() => {
+    const comparedRows = filteredData.filter(d => {
+      const auditValue = String(d.qc_error_category || "").trim();
+      const nuroValue = String(d.nuro_findings || "").trim();
+      return auditValue !== "" && nuroValue !== "";
+    });
+    const matchCount = comparedRows.filter(d => {
+      const auditValue = String(d.qc_error_category || "").trim().toLowerCase();
+      const nuroValue = String(d.nuro_findings || "").trim().toLowerCase();
+      return auditValue === nuroValue;
+    }).length;
+
+    return {
+      comparedCount: comparedRows.length,
+      matchCount,
+      mismatchCount: comparedRows.length - matchCount,
+      hasNuroAudit: comparedRows.length > 0,
+      agreementRate: comparedRows.length ? (matchCount / comparedRows.length) * 100 : 0,
+    };
+  }, [filteredData]);
+
   const locationChartsData = useMemo(() => {
     return getMetricsByLocation(filteredData);
   }, [filteredData]);
@@ -1917,7 +1938,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   </h3>
                 </div>
                 <span className="bg-red-50 text-red-600 font-mono font-bold text-[10px] px-2 py-0.5 rounded">
-                  {metrics.clientDefectDropRate.toFixed(2)}% Agreement Rate
+                  {auditClientAgreement.hasNuroAudit ? `${auditClientAgreement.agreementRate.toFixed(2)}% Agreement Rate` : "Nuro did not audit"}
                 </span>
               </div>
 
@@ -1930,7 +1951,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-red-600 font-display">
-                      {metrics.clientDefectDropCount} Task{metrics.clientDefectDropCount === 1 ? "" : "s"}
+                      {auditClientAgreement.hasNuroAudit ? `${auditClientAgreement.mismatchCount} Task${auditClientAgreement.mismatchCount === 1 ? "" : "s"}` : "Nuro did not audit"}
                     </span>
                     <span className="text-[10px] text-slate-450 block font-normal">AH/AJ nonmatching rows</span>
                   </div>
@@ -1944,13 +1965,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-amber-600 font-display">
-                      {filteredData.filter(d => {
-                        const auditValue = String(d.qc_error_category || "").trim();
-                        const nuroValue = String(d.nuro_findings || "").trim();
-                        return auditValue !== "" && nuroValue !== "";
-                      }).length} Task(s)
+                      {auditClientAgreement.hasNuroAudit ? `${auditClientAgreement.comparedCount} Task(s)` : "0 Task(s)"}
                     </span>
-                    <span className="text-[10px] text-slate-450 block font-normal">Rows included in AH/AJ comparison</span>
+                    <span className="text-[10px] text-slate-450 block font-normal">{auditClientAgreement.hasNuroAudit ? "Rows included in AH/AJ comparison" : "AJ is blank; Nuro did not audit"}</span>
                   </div>
                 </div>
 
@@ -1962,21 +1979,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-emerald-600 font-display">
-                      {filteredData.filter(d => {
-                        const auditValue = String(d.qc_error_category || "").trim().toLowerCase();
-                        const nuroValue = String(d.nuro_findings || "").trim().toLowerCase();
-                        return auditValue !== "" && nuroValue !== "" && auditValue === nuroValue;
-                      }).length} Tasks ({((filteredData.filter(d => {
-                        const auditValue = String(d.qc_error_category || "").trim().toLowerCase();
-                        const nuroValue = String(d.nuro_findings || "").trim().toLowerCase();
-                        return auditValue !== "" && nuroValue !== "" && auditValue === nuroValue;
-                      }).length / (filteredData.filter(d => {
-                        const auditValue = String(d.qc_error_category || "").trim();
-                        const nuroValue = String(d.nuro_findings || "").trim();
-                        return auditValue !== "" && nuroValue !== "";
-                      }).length || 1)) * 100).toFixed(1)}%)
+                      {auditClientAgreement.hasNuroAudit ? `${auditClientAgreement.matchCount} Tasks (${auditClientAgreement.agreementRate.toFixed(1)}%)` : "Nuro did not audit"}
                     </span>
-                    <span className="text-[10px] text-slate-450 block font-normal">Audit-client agreement matches</span>
+                    <span className="text-[10px] text-slate-450 block font-normal">{auditClientAgreement.hasNuroAudit ? "Audit-client agreement matches" : "No AJ values available for agreement scoring"}</span>
                   </div>
                 </div>
               </div>
