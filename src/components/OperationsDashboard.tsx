@@ -99,7 +99,7 @@ const formatSecondsLabel = (value: unknown) => {
 
 const renderPiePercentLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
   if (!percent) return null;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const radius = outerRadius + 18;
   const radians = -midAngle * (Math.PI / 180);
   const x = cx + radius * Math.cos(radians);
   const y = cy + radius * Math.sin(radians);
@@ -107,14 +107,24 @@ const renderPiePercentLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, per
     <text
       x={x}
       y={y}
-      fill="#ffffff"
-      textAnchor="middle"
+      fill="#334155"
+      textAnchor={x > cx ? "start" : "end"}
       dominantBaseline="central"
       className="text-[11px] font-black"
     >
       {(percent * 100).toFixed(1)}%
     </text>
   );
+};
+
+const isSelectQcFailValue = (value?: string): boolean => {
+  const val = String(value || "").trim().toLowerCase();
+  return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
+};
+
+const isQcAuditFailValue = (qcErrorCategory?: string, qcErrorCategoryAudit?: string, failureReason?: string): boolean => {
+  const val = String(qcErrorCategory || qcErrorCategoryAudit || failureReason || "").trim().toLowerCase();
+  return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
 };
 
 interface OperationsDashboardProps {
@@ -250,6 +260,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [rcaTab, setRcaTab] = useState<"cohort" | "tl" | "location">("cohort");
   const [advancedAnalysisTab, setAdvancedAnalysisTab] = useState<"v2" | "stqc">("v2");
   const [reasonMatrixWeekFilter, setReasonMatrixWeekFilter] = useState<string>("");
+  const [batchWeekFilter, setBatchWeekFilter] = useState<string>("All");
   const [stqcErrorTypeFilter, setStqcErrorTypeFilter] = useState<"All" | "Controllable" | "Uncontrollable">("All");
   const [v2ErrorTypeFilter, setV2ErrorTypeFilter] = useState<"All" | "Controllable" | "Uncontrollable">("All");
 
@@ -498,6 +509,30 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const locationChartsData = useMemo(() => {
     return getMetricsByLocation(filteredData);
   }, [filteredData]);
+
+  const batchScoreRows = useMemo(() => {
+    const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
+    taskData.forEach(row => {
+      if (batchWeekFilter !== "All" && row.week_beginning !== batchWeekFilter) return;
+      const batch = String(row.batch_id || "").trim();
+      if (!batch || batch.toLowerCase() === "none" || batch.toLowerCase() === "null") return;
+      if (!grouped[batch]) grouped[batch] = { total: 0, v2Fails: 0, qcFails: 0 };
+      grouped[batch].total++;
+      if (isSelectQcFailValue(row.selectQcResult)) grouped[batch].v2Fails++;
+      if (isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason)) grouped[batch].qcFails++;
+    });
+
+    return Object.entries(grouped)
+      .map(([batch, value]) => ({
+        batch,
+        total: value.total,
+        v2Fails: value.v2Fails,
+        qcFails: value.qcFails,
+        v2Score: value.total ? ((value.total - value.v2Fails) / value.total) * 100 : 0,
+        qcScore: value.total ? ((value.total - value.qcFails) / value.total) * 100 : 0
+      }))
+      .sort((a, b) => a.batch.localeCompare(b.batch));
+  }, [taskData, batchWeekFilter]);
 
   const v2CohortChartsData = useMemo(() => {
     return getMetricsByCohort(filteredData, 'v2_cohort');
@@ -2478,7 +2513,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   paddingAngle={5}
                   dataKey="value"
                   label={renderPiePercentLabel}
-                  labelLine={false}
+                  labelLine={{ stroke: "#94a3b8", strokeWidth: 1 }}
                 >
                   {v2ControllablePieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -2509,7 +2544,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   paddingAngle={5}
                   dataKey="value"
                   label={renderPiePercentLabel}
-                  labelLine={false}
+                  labelLine={{ stroke: "#94a3b8", strokeWidth: 1 }}
                 >
                   {stqcControllablePieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -2532,7 +2567,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           </h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={v2CohortChartsData} margin={{ top: 10, right: 10, left: 20, bottom: 40 }}>
+              <BarChart data={v2CohortChartsData} margin={{ top: 28, right: 10, left: 20, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis 
                   dataKey="cohort" 
@@ -2568,7 +2603,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           </h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stqcCohortChartsData} margin={{ top: 10, right: 10, left: 20, bottom: 40 }}>
+              <BarChart data={stqcCohortChartsData} margin={{ top: 28, right: 10, left: 20, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis 
                   dataKey="cohort" 
@@ -2607,7 +2642,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           </h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={locationChartsData} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
+              <ComposedChart data={locationChartsData} margin={{ top: 28, right: 36, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="location" stroke="#64748b" fontSize={10} tick={{ fill: '#64748b' }} />
                 <YAxis 
@@ -2634,7 +2669,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   <LabelList dataKey="v2AvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
                 </Bar>
                 <Line yAxisId="left" type="monotone" dataKey="v2Accuracy" name="V2 First-Pass Accuracy %" stroke="#2563eb" strokeWidth={4} dot={{ stroke: '#2563eb', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#2563eb', strokeWidth: 2 }}>
-                  <LabelList dataKey="v2Accuracy" position="bottom" formatter={formatPercentLabel} className="text-[10px] font-black fill-blue-700" />
+                  <LabelList dataKey="v2Accuracy" position="top" offset={14} formatter={formatPercentLabel} className="text-[10px] font-black fill-blue-700" />
                 </Line>
               </ComposedChart>
             </ResponsiveContainer>
@@ -2649,7 +2684,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           </h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={locationChartsData} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
+              <ComposedChart data={locationChartsData} margin={{ top: 28, right: 36, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="location" stroke="#64748b" fontSize={10} tick={{ fill: '#64748b' }} />
                 <YAxis 
@@ -2676,11 +2711,69 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   <LabelList dataKey="qcAvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
                 </Bar>
                 <Line yAxisId="left" type="monotone" dataKey="qcAccuracy" name="STQC QC Accuracy %" stroke="#10b981" strokeWidth={4} dot={{ stroke: '#10b981', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#10b981', strokeWidth: 2 }}>
-                  <LabelList dataKey="qcAccuracy" position="bottom" formatter={formatPercentLabel} className="text-[10px] font-black fill-emerald-700" />
+                  <LabelList dataKey="qcAccuracy" position="top" offset={14} formatter={formatPercentLabel} className="text-[10px] font-black fill-emerald-700" />
                 </Line>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+
+      <div className="mt-8 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4">
+          <div>
+            <h3 className="text-sm font-bold tracking-tight text-slate-700 flex items-center gap-2">
+              <Layers className="w-5 h-5 text-indigo-600" />
+              Batch Score by WB
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Batch ID from Col D with V2 and STQC QC scores shown side by side.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-[10px] font-mono font-bold uppercase text-slate-500">
+            WB
+            <select
+              value={batchWeekFilter}
+              onChange={(e) => setBatchWeekFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-[11px] text-slate-700"
+            >
+              {uniqueWeeks.map(week => (
+                <option key={week} value={week}>{week}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-left text-xs text-slate-650">
+            <thead className="bg-slate-50 border-b border-slate-200 font-mono text-[10px] text-slate-500 uppercase">
+              <tr>
+                <th className="px-4 py-3 font-extrabold">Batch ID (Col D)</th>
+                <th className="px-3 py-3 text-center font-extrabold">Tasks</th>
+                <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Score</th>
+                <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Fail</th>
+                <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Score</th>
+                <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Fail</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {batchScoreRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 italic">No batch data available for selected WB.</td>
+                </tr>
+              ) : (
+                batchScoreRows.map(row => (
+                  <tr key={row.batch} className="hover:bg-slate-50/70 transition">
+                    <td className="px-4 py-3 font-bold text-slate-800">{row.batch}</td>
+                    <td className="px-3 py-3 text-center font-mono">{row.total}</td>
+                    <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2Score.toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-center font-mono text-slate-600">{row.v2Fails}</td>
+                    <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcScore.toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-center font-mono text-slate-600">{row.qcFails}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
