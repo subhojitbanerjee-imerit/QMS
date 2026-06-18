@@ -25,7 +25,8 @@ import {
   ComposedChart,
   PieChart,
   Pie,
-  Cell
+  Cell,
+  LabelList
 } from "recharts";
 import {
   Activity,
@@ -85,6 +86,36 @@ function getColumnLetterFromIndex(index: number): string {
   }
   return letter;
 }
+
+const formatPercentLabel = (value: unknown) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${num.toFixed(1)}%` : "";
+};
+
+const formatSecondsLabel = (value: unknown) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${num.toFixed(0)}s` : "";
+};
+
+const renderPiePercentLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+  if (!percent) return null;
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const radians = -midAngle * (Math.PI / 180);
+  const x = cx + radius * Math.cos(radians);
+  const y = cy + radius * Math.sin(radians);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#ffffff"
+      textAnchor="middle"
+      dominantBaseline="central"
+      className="text-[11px] font-black"
+    >
+      {(percent * 100).toFixed(1)}%
+    </text>
+  );
+};
 
 interface OperationsDashboardProps {
   onLocationsUpdate?: (locations: string[]) => void;
@@ -2446,6 +2477,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   outerRadius={90}
                   paddingAngle={5}
                   dataKey="value"
+                  label={renderPiePercentLabel}
+                  labelLine={false}
                 >
                   {v2ControllablePieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -2475,6 +2508,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   outerRadius={90}
                   paddingAngle={5}
                   dataKey="value"
+                  label={renderPiePercentLabel}
+                  labelLine={false}
                 >
                   {stqcControllablePieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -2517,7 +2552,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   cursor={{ fill: '#f8fafc' }}
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
                 />
-                <Bar dataKey="v2Accuracy" name="Accuracy" fill="#4285F4" radius={[4, 4, 0, 0]} barSize={40} />
+                <Bar dataKey="v2Accuracy" name="Accuracy" fill="#4285F4" radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="v2Accuracy" position="top" formatter={formatPercentLabel} className="text-[10px] font-bold fill-slate-700" />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2551,7 +2588,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   cursor={{ fill: '#f8fafc' }}
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
                 />
-                <Bar dataKey="qcAccuracy" name="Accuracy" fill="#4285F4" radius={[4, 4, 0, 0]} barSize={40} />
+                <Bar dataKey="qcAccuracy" name="Accuracy" fill="#4285F4" radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="qcAccuracy" position="top" formatter={formatPercentLabel} className="text-[10px] font-bold fill-slate-700" />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2591,8 +2630,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12 }} 
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Bar yAxisId="right" dataKey="v2AvgDuration" name="Avg Task Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40} />
-                <Line yAxisId="left" type="monotone" dataKey="v2Accuracy" name="V2 First-Pass Accuracy %" stroke="#2563eb" strokeWidth={4} dot={{ stroke: '#2563eb', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#2563eb', strokeWidth: 2 }} />
+                <Bar yAxisId="right" dataKey="v2AvgDuration" name="Avg Task Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="v2AvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
+                </Bar>
+                <Line yAxisId="left" type="monotone" dataKey="v2Accuracy" name="V2 First-Pass Accuracy %" stroke="#2563eb" strokeWidth={4} dot={{ stroke: '#2563eb', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#2563eb', strokeWidth: 2 }}>
+                  <LabelList dataKey="v2Accuracy" position="bottom" formatter={formatPercentLabel} className="text-[10px] font-black fill-blue-700" />
+                </Line>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -2629,8 +2672,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12 }} 
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Bar yAxisId="right" dataKey="qcAvgDuration" name="Avg QC Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40} />
-                <Line yAxisId="left" type="monotone" dataKey="qcAccuracy" name="STQC QC Accuracy %" stroke="#10b981" strokeWidth={4} dot={{ stroke: '#10b981', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#10b981', strokeWidth: 2 }} />
+                <Bar yAxisId="right" dataKey="qcAvgDuration" name="Avg QC Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="qcAvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
+                </Bar>
+                <Line yAxisId="left" type="monotone" dataKey="qcAccuracy" name="STQC QC Accuracy %" stroke="#10b981" strokeWidth={4} dot={{ stroke: '#10b981', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#10b981', strokeWidth: 2 }}>
+                  <LabelList dataKey="qcAccuracy" position="bottom" formatter={formatPercentLabel} className="text-[10px] font-black fill-emerald-700" />
+                </Line>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
