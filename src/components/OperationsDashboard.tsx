@@ -69,6 +69,13 @@ function getQcTypeBucket(qcErrorType?: string): "Controllable" | "Uncontrollable
   return null;
 }
 
+function getV2TypeBucket(v2ErrorType?: string): "Controllable" | "Uncontrollable" | null {
+  const value = String(v2ErrorType || "").trim().toLowerCase();
+  if (value === "controllable") return "Controllable";
+  if (value === "uncontrollable") return "Uncontrollable";
+  return null;
+}
+
 function getColumnLetterFromIndex(index: number): string {
   let temp = index;
   let letter = "";
@@ -581,9 +588,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       
       // Resolve V2 Analytics specific logic
       const v2ErrCat = row.v2_error_category;
-      let v2_ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
-      if (v2ErrCat === "Controllable") v2_ctrl = "Controllable";
-      if (v2ErrCat === "Uncontrollable") v2_ctrl = "Uncontrollable";
+      const v2_ctrl = getV2TypeBucket(row.v2_error_type);
       
       // Use V2 error type for reason matrix if available
       const v2ReasonActual = row.v2_error_type || v2ErrCat;
@@ -594,7 +599,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (!w) return;
 
       // V2 Logic
-      if (v2Loc && v2ReasonActual && v2ReasonActual !== "None" && (v2_ctrl === "Controllable" || v2_ctrl === "Uncontrollable")) {
+      if (v2Loc && v2ReasonActual && v2_ctrl) {
         if (!locWeeklyV2[v2Loc]) locWeeklyV2[v2Loc] = {};
         if (!locWeeklyV2[v2Loc][w]) locWeeklyV2[v2Loc][w] = { total: 0, controllable: 0 };
         locWeeklyV2[v2Loc][w].total++;
@@ -604,7 +609,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         weeklyGrandTotalsV2[w].total++;
         if (v2_ctrl === "Controllable") weeklyGrandTotalsV2[w].controllable++;
       }
-      if (v2tl && v2ReasonActual && v2ReasonActual !== "None" && (v2_ctrl === "Controllable" || v2_ctrl === "Uncontrollable")) {
+      if (v2tl && v2ReasonActual && v2_ctrl) {
         if (!tlWeeklyV2[v2tl]) tlWeeklyV2[v2tl] = {};
         if (!tlWeeklyV2[v2tl][w]) tlWeeklyV2[v2tl][w] = { total: 0, controllable: 0 };
         tlWeeklyV2[v2tl][w].total++;
@@ -715,12 +720,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (w !== reasonMatrixWeekFilter) return;
 
       // Extract V2 specific controllable status
-      const v2ErrCat = row.v2_error_category;
-      let v2_ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
-      if (v2ErrCat === "Controllable") v2_ctrl = "Controllable";
-      if (v2ErrCat === "Uncontrollable") v2_ctrl = "Uncontrollable";
+      const v2_ctrl = getV2TypeBucket(row.v2_error_type);
 
-      if (v2ErrorTypeFilter !== "All" && v2_ctrl !== v2ErrorTypeFilter) return;
+      if (v2ErrorTypeFilter !== "All" && (!v2_ctrl || v2_ctrl !== v2ErrorTypeFilter)) return;
 
       // Use failureReason (Column S) as per user request for Matrix columns
       const reason = row.failureReason;
