@@ -11,6 +11,8 @@ const PORT = 3000;
 
 app.use(express.json());
 
+export default app;
+
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
 let ai: GoogleGenAI | null = null;
@@ -327,6 +329,8 @@ async function bootstrap() {
   });
 }
 
-bootstrap().catch((err) => {
-  console.error("Critical error bootstrapping full-stack server:", err);
-});
+if (!process.env.VERCEL) {
+  bootstrap().catch((err) => {
+    console.error("Critical error bootstrapping full-stack server:", err);
+  });
+}
