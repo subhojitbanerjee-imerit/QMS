@@ -62,6 +62,13 @@ import { User } from "firebase/auth";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
 
+function getQcTypeBucket(qcErrorType?: string): "Controllable" | "Uncontrollable" | null {
+  const value = String(qcErrorType || "").trim().toLowerCase();
+  if (value === "controllable") return "Controllable";
+  if (value === "uncontrollable") return "Uncontrollable";
+  return null;
+}
+
 function getColumnLetterFromIndex(index: number): string {
   let temp = index;
   let letter = "";
@@ -582,7 +589,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       const v2ReasonActual = row.v2_error_type || v2ErrCat;
       
       const stqcReason = row.qc_error_type;
-      const stqc_ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
+      const stqc_ctrl = getQcTypeBucket(row.qc_error_type);
 
       if (!w) return;
 
@@ -614,7 +621,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       }
 
       // STQC Logic
-      if (stqcLoc && stqcReason && stqcReason !== "None" && (stqc_ctrl === "Controllable" || stqc_ctrl === "Uncontrollable")) {
+      if (stqcLoc && stqcReason && stqc_ctrl) {
         if (!locWeeklyStqc[stqcLoc]) locWeeklyStqc[stqcLoc] = {};
         if (!locWeeklyStqc[stqcLoc][w]) locWeeklyStqc[stqcLoc][w] = { total: 0, controllable: 0 };
         locWeeklyStqc[stqcLoc][w].total++;
@@ -624,13 +631,13 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         weeklyGrandTotalsStqc[w].total++;
         if (stqc_ctrl === "Controllable") weeklyGrandTotalsStqc[w].controllable++;
       }
-      if (stqcTl && stqcReason && stqcReason !== "None" && (stqc_ctrl === "Controllable" || stqc_ctrl === "Uncontrollable")) {
+      if (stqcTl && stqcReason && stqc_ctrl) {
         if (!tlWeeklyStqc[stqcTl]) tlWeeklyStqc[stqcTl] = {};
         if (!tlWeeklyStqc[stqcTl][w]) tlWeeklyStqc[stqcTl][w] = { total: 0, controllable: 0 };
         tlWeeklyStqc[stqcTl][w].total++;
         if (stqc_ctrl === "Controllable") tlWeeklyStqc[stqcTl][w].controllable++;
       }
-      if (stqcReason && stqcReason !== "None" && stqcLoc && displayWeeks.includes(w)) {
+      if (stqcReason && stqc_ctrl && stqcLoc && displayWeeks.includes(w)) {
         if (!reasonMatrixStqc[w]) reasonMatrixStqc[w] = {};
         if (!reasonMatrixStqc[w][stqcReason]) reasonMatrixStqc[w][stqcReason] = {};
         if (!reasonMatrixStqc[w][stqcReason][stqcLoc]) reasonMatrixStqc[w][stqcReason][stqcLoc] = 0;
@@ -676,7 +683,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       const w = row.week_beginning;
       if (w !== reasonMatrixWeekFilter) return;
 
-      const ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
+      const ctrl = getQcTypeBucket(row.qc_error_type);
+      if (!ctrl) return;
       if (stqcErrorTypeFilter !== "All" && ctrl !== stqcErrorTypeFilter) return;
 
       const reason = row.qc_error_type;
