@@ -216,7 +216,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
   // Tab selections
   const [distributionTab, setDistributionTab] = useState<"v2" | "qc">("v2");
-  const [rcaTab, setRcaTab] = useState<"cohort" | "tl" | "location" | "joint">("cohort");
+  const [rcaTab, setRcaTab] = useState<"cohort" | "tl" | "v2Location" | "stqcLocation" | "joint">("cohort");
   const [advancedAnalysisTab, setAdvancedAnalysisTab] = useState<"v2" | "stqc">("v2");
   const [reasonMatrixWeekFilter, setReasonMatrixWeekFilter] = useState<string>("");
   const [stqcErrorTypeFilter, setStqcErrorTypeFilter] = useState<"All" | "Controllable" | "Uncontrollable">("All");
@@ -2052,8 +2052,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     TL MANAGERS (AF/AG)
                   </button>
                   <button
-                    onClick={() => setRcaTab("location")}
-                    className={`px-3 py-1 text-[10px] font-mono font-bold rounded-md transition ${rcaTab === "location" ? "bg-white text-indigo-700 shadow-3xs" : "text-slate-500 hover:text-slate-800"}`}
+                    onClick={() => setRcaTab("v2Location")}
+                    className={`px-3 py-1 text-[10px] font-mono font-bold rounded-md transition ${rcaTab === "v2Location" ? "bg-white text-indigo-700 shadow-3xs" : "text-slate-500 hover:text-slate-800"}`}
+                  >
+                    V2 LOCATIONS (AM)
+                  </button>
+                  <button
+                    onClick={() => setRcaTab("stqcLocation")}
+                    className={`px-3 py-1 text-[10px] font-mono font-bold rounded-md transition ${rcaTab === "stqcLocation" ? "bg-white text-indigo-700 shadow-3xs" : "text-slate-500 hover:text-slate-800"}`}
                   >
                     STQC LOCATIONS (AO)
                   </button>
@@ -2082,7 +2088,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             let dataToExport: any[] = [];
                             if (rcaTab === "cohort") dataToExport = cohortDistributionRows;
                             else if (rcaTab === "tl") dataToExport = tlDistributionRows;
-                            else dataToExport = locationDistributionRowsV2;
+                            else if (rcaTab === "v2Location") dataToExport = locationDistributionRowsV2;
+                            else dataToExport = locationDistributionRowsQC;
                             exportToCSV(dataToExport, distColumnHeaders, `V2_Quality_Distribution_${rcaTab}.csv`);
                           }}
                           className="p-1 px-1.5 bg-white border border-slate-200 rounded text-[9px] font-mono font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs"
@@ -2095,7 +2102,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             let title = "";
                             if (rcaTab === "cohort") { dataToExport = cohortDistributionRows; title = "V2 Cohort Quality Distribution"; }
                             else if (rcaTab === "tl") { dataToExport = tlDistributionRows; title = "V2 TL Quality Distribution"; }
-                            else { dataToExport = locationDistributionRowsV2; title = "V2 Location Quality Distribution"; }
+                            else if (rcaTab === "v2Location") { dataToExport = locationDistributionRowsV2; title = "V2 Location Quality Distribution"; }
+                            else { dataToExport = locationDistributionRowsQC; title = "STQC Location Quality Distribution"; }
                             exportToPDF(dataToExport, distColumnHeaders, title, `V2_Quality_Distribution_${rcaTab}.pdf`);
                           }}
                           className="p-1 px-1.5 bg-white border border-slate-200 rounded text-[9px] font-mono font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs"
@@ -2182,7 +2190,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                           ))
                         )}
 
-                        {rcaTab === "location" && (
+                        {rcaTab === "v2Location" && (
                           locationDistributionRowsV2.map((r, i) => (
                             <tr key={i} className="hover:bg-slate-50/70 transition">
                               <td className="px-3 py-2 text-slate-800 font-bold">{r.segment}</td>
@@ -2220,6 +2228,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             let dataToExport: any[] = [];
                             if (rcaTab === "cohort") dataToExport = stqcCohortDistributionRows;
                             else if (rcaTab === "tl") dataToExport = stqcTlDistributionRows;
+                            else if (rcaTab === "v2Location") dataToExport = locationDistributionRowsV2;
                             else dataToExport = locationDistributionRowsQC;
                             exportToCSV(dataToExport, distColumnHeaders, `QC_Quality_Distribution_${rcaTab}.csv`);
                           }}
@@ -2233,7 +2242,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             let title = "";
                             if (rcaTab === "cohort") { dataToExport = stqcCohortDistributionRows; title = "QC Cohort Quality Distribution"; }
                             else if (rcaTab === "tl") { dataToExport = stqcTlDistributionRows; title = "QC TL Quality Distribution"; }
-                            else { dataToExport = locationDistributionRowsQC; title = "QC Location Quality Distribution"; }
+                            else if (rcaTab === "v2Location") { dataToExport = locationDistributionRowsV2; title = "V2 Location Quality Distribution"; }
+                            else { dataToExport = locationDistributionRowsQC; title = "STQC Location Quality Distribution"; }
                             exportToPDF(dataToExport, distColumnHeaders, title, `QC_Quality_Distribution_${rcaTab}.pdf`);
                           }}
                           className="p-1 px-1.5 bg-white border border-slate-200 rounded text-[9px] font-mono font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs"
@@ -2320,7 +2330,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                           ))
                         )}
 
-                        {rcaTab === "location" && (
+                        {rcaTab === "v2Location" && (
+                          locationDistributionRowsV2.map((r, i) => (
+                            <tr key={i} className="hover:bg-slate-50/70 transition">
+                              <td className="px-3 py-2 text-slate-800 font-bold">{r.segment}</td>
+                              <td className="px-2 py-2 text-center text-red-650 font-mono font-bold bg-red-50/5">{r.sub50}</td>
+                              <td className="px-2 py-2 text-center text-amber-650 font-mono font-bold">{r.b50_70}</td>
+                              <td className="px-2 py-2 text-center text-slate-500 font-mono">{r.b70_80}</td>
+                              <td className="px-2 py-2 text-center text-green-700 font-mono">{r.b80_85}</td>
+                              <td className="px-2 py-2 text-center text-emerald-600 font-mono font-bold bg-emerald-50/5">{r.b85}</td>
+                              <td className="px-3 py-2 text-right font-bold text-slate-700">{r.totalCount}</td>
+                            </tr>
+                          ))
+                        )}
+
+                        {rcaTab === "stqcLocation" && (
                           locationDistributionRowsQC.map((r, i) => (
                             <tr key={i} className="hover:bg-slate-50/70 transition">
                               <td className="px-3 py-2 text-slate-800 font-bold">{r.segment}</td>
@@ -3649,3 +3673,16 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 </div>
   );
 }
+                        {rcaTab === "stqcLocation" && (
+                          locationDistributionRowsQC.map((r, i) => (
+                            <tr key={i} className="hover:bg-slate-50/70 transition">
+                              <td className="px-3 py-2 text-slate-800 font-bold">{r.segment}</td>
+                              <td className="px-2 py-2 text-center text-red-650 font-mono font-bold bg-red-50/5">{r.sub50}</td>
+                              <td className="px-2 py-2 text-center text-amber-650 font-mono font-bold">{r.b50_70}</td>
+                              <td className="px-2 py-2 text-center text-slate-500 font-mono">{r.b70_80}</td>
+                              <td className="px-2 py-2 text-center text-green-700 font-mono">{r.b80_85}</td>
+                              <td className="px-2 py-2 text-center text-emerald-600 font-mono font-bold bg-emerald-50/5">{r.b85}</td>
+                              <td className="px-3 py-2 text-right font-bold text-slate-700">{r.totalCount}</td>
+                            </tr>
+                          ))
+                        )}
