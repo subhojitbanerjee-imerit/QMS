@@ -545,6 +545,33 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       .sort((a, b) => a.batch.localeCompare(b.batch));
   }, [taskData, batchWeekFilter]);
 
+  const weeklyScoreRows = useMemo(() => {
+    const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
+    taskData.forEach(row => {
+      const week = String(row.week_beginning || "").trim();
+      if (!week || week.toLowerCase() === "none" || week.toLowerCase() === "null") return;
+      if (!grouped[week]) grouped[week] = { total: 0, v2Fails: 0, qcFails: 0 };
+      grouped[week].total++;
+      if (isSelectQcFailValue(row.selectQcResult)) grouped[week].v2Fails++;
+      if (isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason)) grouped[week].qcFails++;
+    });
+
+    return Object.entries(grouped)
+      .map(([week, value]) => ({
+        week,
+        total: value.total,
+        v2Score: value.total ? ((value.total - value.v2Fails) / value.total) * 100 : 0,
+        qcScore: value.total ? ((value.total - value.qcFails) / value.total) * 100 : 0
+      }))
+      .sort((a, b) => {
+        const aTime = new Date(a.week).getTime();
+        const bTime = new Date(b.week).getTime();
+        if (!isNaN(aTime) && !isNaN(bTime)) return bTime - aTime;
+        return b.week.localeCompare(a.week);
+      })
+      .slice(0, 8);
+  }, [taskData]);
+
   const v2CohortChartsData = useMemo(() => {
     return getMetricsByCohort(filteredData, 'v2_cohort');
   }, [filteredData]);
@@ -2742,6 +2769,80 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 </Line>
               </ComposedChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
+          <div className="border-b border-slate-100 pb-4 mb-4">
+            <h3 className="text-sm font-bold tracking-tight text-slate-700 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-blue-600" />
+              Last 8 Weeks V2 Score
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1">Weekly V2 score by WB, newest week first.</p>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs text-slate-650">
+              <thead className="bg-slate-50 border-b border-slate-200 font-mono text-[10px] text-slate-500 uppercase">
+                <tr>
+                  <th className="px-4 py-3 font-extrabold">WB</th>
+                  <th className="px-3 py-3 text-center font-extrabold">Tasks</th>
+                  <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Score</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {weeklyScoreRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-8 text-center text-slate-400 italic">No WB data available.</td>
+                  </tr>
+                ) : (
+                  weeklyScoreRows.map(row => (
+                    <tr key={row.week} className="hover:bg-slate-50/70 transition">
+                      <td className="px-4 py-3 font-bold text-slate-800">{row.week}</td>
+                      <td className="px-3 py-3 text-center font-mono">{row.total}</td>
+                      <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2Score.toFixed(1)}%</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
+          <div className="border-b border-slate-100 pb-4 mb-4">
+            <h3 className="text-sm font-bold tracking-tight text-slate-700 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-emerald-600" />
+              Last 8 Weeks STQC Score
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1">Weekly STQC QC score by WB, newest week first.</p>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs text-slate-650">
+              <thead className="bg-slate-50 border-b border-slate-200 font-mono text-[10px] text-slate-500 uppercase">
+                <tr>
+                  <th className="px-4 py-3 font-extrabold">WB</th>
+                  <th className="px-3 py-3 text-center font-extrabold">Tasks</th>
+                  <th className="px-3 py-3 text-center font-extrabold text-emerald-700">STQC Score</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {weeklyScoreRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-8 text-center text-slate-400 italic">No WB data available.</td>
+                  </tr>
+                ) : (
+                  weeklyScoreRows.map(row => (
+                    <tr key={row.week} className="hover:bg-slate-50/70 transition">
+                      <td className="px-4 py-3 font-bold text-slate-800">{row.week}</td>
+                      <td className="px-3 py-3 text-center font-mono">{row.total}</td>
+                      <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcScore.toFixed(1)}%</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
