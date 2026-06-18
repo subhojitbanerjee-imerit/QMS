@@ -149,6 +149,19 @@ const renderScoreWithRag = (score: number, scoreClassName: string) => {
   );
 };
 
+const incrementCause = (bucket: Record<string, number>, key?: string) => {
+  const value = String(key || "").trim();
+  if (!value || value.toLowerCase() === "none" || value.toLowerCase() === "null") return;
+  bucket[value] = (bucket[value] || 0) + 1;
+};
+
+const topCauses = (bucket: Record<string, number>, limit = 5) => {
+  return Object.entries(bucket)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+};
+
 interface OperationsDashboardProps {
   onLocationsUpdate?: (locations: string[]) => void;
 }
@@ -538,6 +551,58 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       agreementRate: comparedRows.length ? (matchCount / comparedRows.length) * 100 : 0,
     };
   }, [filteredData]);
+
+  const fishboneRcaData = useMemo(() => {
+    const categories = {
+      People: {} as Record<string, number>,
+      Process: {} as Record<string, number>,
+      Location: {} as Record<string, number>,
+      Cohort: {} as Record<string, number>,
+      Leadership: {} as Record<string, number>,
+      Failure: {} as Record<string, number>
+    };
+
+    filteredData.forEach(row => {
+      const hasV2Fail = isSelectQcFailValue(row.selectQcResult);
+      const hasQcFail = isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason);
+      const hasFailureReason = String(row.failureReason || "").trim().toLowerCase() !== "none" && String(row.failureReason || "").trim() !== "";
+      if (!hasV2Fail && !hasQcFail && !hasFailureReason) return;
+
+      incrementCause(categories.People, row.simteacher_v2_labeler);
+      incrementCause(categories.People, row.qa_user_id);
+      incrementCause(categories.Process, row.v2_error_type);
+      incrementCause(categories.Process, row.qc_error_type);
+      incrementCause(categories.Location, row.location);
+      incrementCause(categories.Location, row.stqc_location);
+      incrementCause(categories.Cohort, row.v2_cohort);
+      incrementCause(categories.Cohort, row.stqc_cohort);
+      incrementCause(categories.Leadership, row.v2_tl);
+      incrementCause(categories.Leadership, row.stqc_tl);
+      incrementCause(categories.Failure, row.failureReason);
+      incrementCause(categories.Failure, row.qc_error_category || row.qc_error_category_audit);
+    });
+
+    const rows = Object.entries(categories).map(([category, bucket]) => ({
+      category,
+      causes: topCauses(bucket)
+    }));
+
+    return {
+      filteredCount: filteredData.length,
+      issueCount: filteredData.filter(row => {
+        const hasFailureReason = String(row.failureReason || "").trim().toLowerCase() !== "none" && String(row.failureReason || "").trim() !== "";
+        return isSelectQcFailValue(row.selectQcResult) || isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason) || hasFailureReason;
+      }).length,
+      scope: selectedWeek !== "All"
+        ? `WB: ${selectedWeek}`
+        : selectedMonth !== "All"
+          ? `Month: ${selectedMonth}`
+          : startDate || endDate
+            ? `Date Range: ${startDate || "Start"} to ${endDate || "End"}`
+            : "Current active filters",
+      rows
+    };
+  }, [filteredData, selectedWeek, selectedMonth, startDate, endDate]);
 
   const locationChartsData = useMemo(() => {
     return getMetricsByLocation(filteredData);
@@ -2791,6 +2856,60 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 </Line>
               </ComposedChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 border-b border-slate-100 pb-4 mb-6">
+          <div>
+            <h3 className="text-sm font-display font-extrabold text-slate-800 uppercase tracking-tight flex items-center gap-2">
+              <CornerRightUp className="w-4 h-4 text-indigo-600" />
+              Fishbone RCA by Filter Scope
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
+              Generated from active WB, month, date range, and quality filters. Cause counts use rows with V2 fail, QC fail, or failure reason.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[10px] font-mono font-bold">
+            <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 rounded px-2 py-1">{fishboneRcaData.scope}</span>
+            <span className="bg-slate-50 text-slate-600 border border-slate-200 rounded px-2 py-1">{fishboneRcaData.issueCount} issue rows / {fishboneRcaData.filteredCount} filtered rows</span>
+          </div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:p-6">
+          <div className="hidden lg:block absolute left-[13%] right-[13%] top-1/2 h-1 bg-slate-300 rounded-full"></div>
+          <div className="hidden lg:block absolute right-[11%] top-1/2 -mt-2 h-0 w-0 border-y-[10px] border-y-transparent border-l-[18px] border-l-slate-300"></div>
+          <div className="relative grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {fishboneRcaData.rows.map((group, index) => (
+              <div key={group.category} className="bg-white border border-slate-200 rounded-xl p-4 shadow-3xs">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h4 className="text-[11px] font-black uppercase tracking-wide text-slate-800">{group.category}</h4>
+                  <span className={`w-2.5 h-2.5 rounded-full ${index % 2 === 0 ? "bg-indigo-500" : "bg-emerald-500"}`}></span>
+                </div>
+                {group.causes.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">No cause signal in current scope.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {group.causes.map(cause => (
+                      <li key={cause.name} className="flex items-center justify-between gap-3 text-[11px]">
+                        <span className="font-bold text-slate-700 truncate" title={cause.name}>{cause.name}</span>
+                        <span className="shrink-0 rounded bg-slate-100 border border-slate-200 px-2 py-0.5 font-mono font-black text-slate-600">{cause.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 rounded-xl bg-slate-900 text-white p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-mono font-black uppercase tracking-widest text-indigo-200">Fishbone Effect</p>
+              <p className="text-sm font-black">Quality score leakage in selected operational scope</p>
+            </div>
+            <div className="text-[11px] text-slate-300 font-medium">
+              Review highest count causes first, then validate with batch, member, TL, location, and failure matrix filters.
+            </div>
           </div>
         </div>
       </div>
