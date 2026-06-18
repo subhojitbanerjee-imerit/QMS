@@ -581,7 +581,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       // Use V2 error type for reason matrix if available
       const v2ReasonActual = row.v2_error_type || v2ErrCat;
       
-      const stqcReason = row.failureReason;
+      const stqcReason = row.qc_error_type;
       const stqc_ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
 
       if (!w) return;
@@ -679,7 +679,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       const ctrl = row.is_controllable ? "Controllable" : "Uncontrollable";
       if (stqcErrorTypeFilter !== "All" && ctrl !== stqcErrorTypeFilter) return;
 
-      const reason = row.failureReason;
+      const reason = row.qc_error_type;
       const loc = row.stqc_location;
 
       if (reason && reason !== "None" && loc) {
