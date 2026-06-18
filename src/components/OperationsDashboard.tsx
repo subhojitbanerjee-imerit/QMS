@@ -3673,16 +3673,3 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 </div>
   );
 }
-                        {rcaTab === "stqcLocation" && (
-                          locationDistributionRowsQC.map((r, i) => (
-                            <tr key={i} className="hover:bg-slate-50/70 transition">
-                              <td className="px-3 py-2 text-slate-800 font-bold">{r.segment}</td>
-                              <td className="px-2 py-2 text-center text-red-650 font-mono font-bold bg-red-50/5">{r.sub50}</td>
-                              <td className="px-2 py-2 text-center text-amber-650 font-mono font-bold">{r.b50_70}</td>
-                              <td className="px-2 py-2 text-center text-slate-500 font-mono">{r.b70_80}</td>
-                              <td className="px-2 py-2 text-center text-green-700 font-mono">{r.b80_85}</td>
-                              <td className="px-2 py-2 text-center text-emerald-600 font-mono font-bold bg-emerald-50/5">{r.b85}</td>
-                              <td className="px-3 py-2 text-right font-bold text-slate-700">{r.totalCount}</td>
-                            </tr>
-                          ))
-                        )}

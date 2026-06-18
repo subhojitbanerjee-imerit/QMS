@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
+import { FirebaseApp, initializeApp } from "firebase/app";
+import { Auth, getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
 
 // Initialize Firebase App
 const firebaseConfig = {
@@ -12,21 +12,43 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-
 // Google Auth Provider setup with Sheets Readonly scope
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = typeof window !== "undefined" ? localStorage.getItem("sheet_access_token") : null;
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+
+function getConfiguredAuth(): Auth | null {
+  if (auth) return auth;
+
+  if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId || !firebaseConfig.appId) {
+    return null;
+  }
+
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    return auth;
+  } catch (error) {
+    console.error("Firebase initialization failed:", error);
+    return null;
+  }
+}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  const configuredAuth = getConfiguredAuth();
+  if (!configuredAuth) {
+    if (onAuthFailure) onAuthFailure();
+    return () => {};
+  }
+
+  return onAuthStateChanged(configuredAuth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
@@ -45,9 +67,14 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  const configuredAuth = getConfiguredAuth();
+  if (!configuredAuth) {
+    throw new Error("Firebase environment variables are not configured. Add VITE_FIREBASE_* values in Vercel to enable Google Sheets login.");
+  }
+
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(configuredAuth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error("Failed to retrieve access token from Google Auth credential");
@@ -68,7 +95,10 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logout = async () => {
-  await auth.signOut();
+  const configuredAuth = getConfiguredAuth();
+  if (configuredAuth) {
+    await configuredAuth.signOut();
+  }
   cachedAccessToken = null;
   if (typeof window !== "undefined") localStorage.removeItem("sheet_access_token");
 };
