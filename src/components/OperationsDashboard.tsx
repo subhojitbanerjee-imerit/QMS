@@ -2665,8 +2665,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12 }} 
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Bar yAxisId="right" dataKey="v2AvgDuration" name="Avg Task Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40}>
-                  <LabelList dataKey="v2AvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
+                <Bar yAxisId="right" dataKey="v2AvgDuration" name="Avg Task Duration" fill="#64748b" fillOpacity={0.35} radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="v2AvgDuration" position="insideTop" offset={8} formatter={formatSecondsLabel} fill="#ffffff" className="text-[10px] font-black" />
                 </Bar>
                 <Line yAxisId="left" type="monotone" dataKey="v2Accuracy" name="V2 First-Pass Accuracy %" stroke="#2563eb" strokeWidth={4} dot={{ stroke: '#2563eb', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#2563eb', strokeWidth: 2 }}>
                   <LabelList dataKey="v2Accuracy" position="top" offset={14} formatter={formatPercentLabel} className="text-[10px] font-black fill-blue-700" />
@@ -2707,8 +2707,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", color: "#0f172a", borderRadius: "12px", fontSize: 12 }} 
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                <Bar yAxisId="right" dataKey="qcAvgDuration" name="Avg QC Duration" fill="#64748b" fillOpacity={0.25} radius={[4, 4, 0, 0]} barSize={40}>
-                  <LabelList dataKey="qcAvgDuration" position="top" formatter={formatSecondsLabel} className="text-[10px] font-bold fill-slate-500" />
+                <Bar yAxisId="right" dataKey="qcAvgDuration" name="Avg QC Duration" fill="#64748b" fillOpacity={0.35} radius={[4, 4, 0, 0]} barSize={40}>
+                  <LabelList dataKey="qcAvgDuration" position="insideTop" offset={8} formatter={formatSecondsLabel} fill="#ffffff" className="text-[10px] font-black" />
                 </Bar>
                 <Line yAxisId="left" type="monotone" dataKey="qcAccuracy" name="STQC QC Accuracy %" stroke="#10b981" strokeWidth={4} dot={{ stroke: '#10b981', strokeWidth: 3, r: 6, fill: '#fff' }} activeDot={{ r: 8, stroke: '#10b981', strokeWidth: 2 }}>
                   <LabelList dataKey="qcAccuracy" position="top" offset={14} formatter={formatPercentLabel} className="text-[10px] font-black fill-emerald-700" />
@@ -2750,15 +2750,13 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <th className="px-4 py-3 font-extrabold">Batch ID (Col D)</th>
                 <th className="px-3 py-3 text-center font-extrabold">Tasks</th>
                 <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Score</th>
-                <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Fail</th>
                 <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Score</th>
-                <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Fail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {batchScoreRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 italic">No batch data available for selected WB.</td>
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400 italic">No batch data available for selected WB.</td>
                 </tr>
               ) : (
                 batchScoreRows.map(row => (
@@ -2766,9 +2764,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     <td className="px-4 py-3 font-bold text-slate-800">{row.batch}</td>
                     <td className="px-3 py-3 text-center font-mono">{row.total}</td>
                     <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2Score.toFixed(1)}%</td>
-                    <td className="px-3 py-3 text-center font-mono text-slate-600">{row.v2Fails}</td>
                     <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcScore.toFixed(1)}%</td>
-                    <td className="px-3 py-3 text-center font-mono text-slate-600">{row.qcFails}</td>
                   </tr>
                 ))
               )}
