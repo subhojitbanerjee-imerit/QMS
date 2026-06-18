@@ -1958,7 +1958,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 space-y-2">
                   <p className="font-bold text-emerald-800 text-xs">✅ QA & CLIENT ALIGNMENT</p>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
-                    Both parties are in perfect consensus on quality. Either both agreed it is passed or both reported the same exact failure categories.
+                    STQC QC accuracy now uses the audit fail-count rule: fail, failed, reject, or rejected in QC ERROR CATEGORY_Based on audit lowers the score.
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-emerald-600 font-display">

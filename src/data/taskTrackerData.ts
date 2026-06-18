@@ -544,12 +544,8 @@ const isSelectQcFail = (selectQcResult?: string): boolean => {
 };
 
 const isQcErrorCategoryFail = (qcErrorCategory?: string, qcErrorCategoryAudit?: string, failureReason?: string): boolean => {
-  const cat = String(qcErrorCategory || qcErrorCategoryAudit || "").trim().toLowerCase();
-  if (cat !== "") {
-    return cat !== "none" && cat !== "n/a" && cat !== "null" && cat !== "none precision" && cat !== "pass" && cat !== "passed";
-  }
-  const reason = String(failureReason || "").trim().toLowerCase();
-  return reason !== "" && reason !== "none" && reason !== "n/a" && reason !== "null" && reason !== "none precision" && reason !== "pass" && reason !== "passed";
+  const val = String(qcErrorCategory || qcErrorCategoryAudit || failureReason || "").trim().toLowerCase();
+  return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
 };
 
 // Analytical Helper utilities to feed charts and dashboards
@@ -581,17 +577,10 @@ export const getOperationalMetrics = (data: TaskTrackerRow[]) => {
   const v2FailsGlobal = data.filter(d => isSelectQcFail(d.selectQcResult)).length;
   const v2Accuracy = total > 0 ? ((total - v2FailsGlobal) / total) * 100 : 100;
 
-  // 2. "QC score will be generated based on checking whether selectQcResult and QC ERROR CATEGORY_Based on audit both col has same value or not"
-  // If they match (both agree fail or both agree pass), they get 100%, otherwise 0.
-  const qcAuditedRows = data.filter(d => {
-    if (!d.qa_user_id || String(d.qa_user_id).trim() === "") return false;
-    const key = String(d.qa_user_id).trim().toLowerCase();
-    return key !== "unknown_auditor" && key !== "n/a" && key !== "null" && key !== "unassigned";
-  });
-  const qcMatches = qcAuditedRows.filter(d => {
-    return isSelectQcFail(d.selectQcResult) === isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason);
-  }).length;
-  const qcAccuracy = qcAuditedRows.length ? (qcMatches / qcAuditedRows.length) * 100 : 100;
+  // 2. STQC QC Accuracy is generated from QC ERROR CATEGORY_Based on audit fail counts.
+  // Accuracy = (Total Tasks - QC Fail Count) / Total Tasks * 100
+  const qcFailsGlobal = data.filter(d => isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)).length;
+  const qcAccuracy = total > 0 ? ((total - qcFailsGlobal) / total) * 100 : 100;
 
   // 3. CLIENT DEFECT DROP: based on QC ERROR CATEGORY_Based on audit being clean ("none") but Nuro Findings being a reject
   const clientDefectDropCount = data.filter(d => {
@@ -665,7 +654,7 @@ export const getMetricsByLocation = (data: TaskTrackerRow[]) => {
   const grouped: Record<string, { 
     total: number; 
     v2_fails: number; 
-    qc_matches: number; 
+    qc_fails: number;
     qc_audited_count: number; 
     expected: number; 
     actual: number; 
@@ -680,7 +669,7 @@ export const getMetricsByLocation = (data: TaskTrackerRow[]) => {
     
     if (!grouped[locValue]) {
       grouped[locValue] = { 
-        total: 0, v2_fails: 0, qc_matches: 0, qc_audited_count: 0, expected: 0, actual: 0, defects: 0, v2_total_duration: 0, qc_total_duration: 0
+        total: 0, v2_fails: 0, qc_fails: 0, qc_audited_count: 0, expected: 0, actual: 0, defects: 0, v2_total_duration: 0, qc_total_duration: 0
       };
     }
     const bucket = grouped[locValue];
@@ -697,10 +686,8 @@ export const getMetricsByLocation = (data: TaskTrackerRow[]) => {
     if (isValidAuditor) {
       bucket.qc_audited_count++;
       bucket.qc_total_duration += (d.qc_task_duration_seconds || 0);
-      const isSelectFail = isSelectQcFail(d.selectQcResult);
-      const isErrorFail = isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason);
-      if (isSelectFail === isErrorFail) {
-         bucket.qc_matches++;
+      if (isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)) {
+        bucket.qc_fails++;
       }
     }
     
@@ -717,7 +704,7 @@ export const getMetricsByLocation = (data: TaskTrackerRow[]) => {
     location: key,
     total: grouped[key].total,
     v2Accuracy: grouped[key].total > 0 ? Number(((grouped[key].total - grouped[key].v2_fails) / grouped[key].total * 100).toFixed(2)) : 100,
-    qcAccuracy: grouped[key].qc_audited_count > 0 ? Number((grouped[key].qc_matches / grouped[key].qc_audited_count * 100).toFixed(2)) : 100,
+    qcAccuracy: grouped[key].total > 0 ? Number(((grouped[key].total - grouped[key].qc_fails) / grouped[key].total * 100).toFixed(2)) : 100,
     efficiency: grouped[key].expected > 0 ? Number(((grouped[key].actual / grouped[key].expected) * 100).toFixed(1)) : 100,
     nuroDefectRate: grouped[key].total > 0 ? Number(((grouped[key].defects / grouped[key].total) * 100).toFixed(2)) : 0,
     v2AvgDuration: grouped[key].total > 0 ? Math.round(grouped[key].v2_total_duration / grouped[key].total) : 0,
@@ -727,12 +714,12 @@ export const getMetricsByLocation = (data: TaskTrackerRow[]) => {
 
 // Groups dataset metrics by Cohort
 export const getMetricsByCohort = (data: TaskTrackerRow[], cohortField: 'v2_cohort' | 'stqc_cohort' = 'v2_cohort') => {
-  const grouped: Record<string, { total: number; v2_fails: number; qc_matches: number; qc_audited_count: number; expected: number; actual: number; defects: number }> = {};
+  const grouped: Record<string, { total: number; v2_fails: number; qc_fails: number; qc_audited_count: number; expected: number; actual: number; defects: number }> = {};
   
   data.forEach(d => {
     const cohortKey = d[cohortField] || (cohortField === 'v2_cohort' ? "V2 - Cohort 1" : "STQC - Cohort 1");
     if (!grouped[cohortKey]) {
-      grouped[cohortKey] = { total: 0, v2_fails: 0, qc_matches: 0, qc_audited_count: 0, expected: 0, actual: 0, defects: 0 };
+      grouped[cohortKey] = { total: 0, v2_fails: 0, qc_fails: 0, qc_audited_count: 0, expected: 0, actual: 0, defects: 0 };
     }
     grouped[cohortKey].total++;
     
@@ -745,10 +732,8 @@ export const getMetricsByCohort = (data: TaskTrackerRow[], cohortField: 'v2_coho
     
     if (isValidAuditor) {
       grouped[cohortKey].qc_audited_count++;
-      const isSelectFail = isSelectQcFail(d.selectQcResult);
-      const isErrorFail = isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason);
-      if (isSelectFail === isErrorFail) {
-        grouped[cohortKey].qc_matches++;
+      if (isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)) {
+        grouped[cohortKey].qc_fails++;
       }
     }
     
@@ -761,7 +746,7 @@ export const getMetricsByCohort = (data: TaskTrackerRow[], cohortField: 'v2_coho
     cohort: key,
     total: grouped[key].total,
     v2Accuracy: grouped[key].total > 0 ? ((grouped[key].total - grouped[key].v2_fails) / grouped[key].total) * 100 : 100,
-    qcAccuracy: grouped[key].qc_audited_count > 0 ? (grouped[key].qc_matches / grouped[key].qc_audited_count) * 100 : 100,
+    qcAccuracy: grouped[key].total > 0 ? ((grouped[key].total - grouped[key].qc_fails) / grouped[key].total) * 100 : 100,
     efficiency: (grouped[key].expected > 0) ? (grouped[key].expected / grouped[key].actual) * 100 : 100,
     nuroDefectRate: grouped[key].total > 0 ? (grouped[key].defects / grouped[key].total) * 100 : 0
   })).sort((a, b) => a.cohort.localeCompare(b.cohort));
@@ -769,12 +754,12 @@ export const getMetricsByCohort = (data: TaskTrackerRow[], cohortField: 'v2_coho
 
 // Groups metrics by Team Lead
 export const getMetricsByTeamLead = (data: TaskTrackerRow[]) => {
-  const grouped: Record<string, { total: number; v2_fails: number; qc_matches: number; qc_audited_count: number; expected: number; actual: number }> = {};
+  const grouped: Record<string, { total: number; v2_fails: number; qc_fails: number; qc_audited_count: number; expected: number; actual: number }> = {};
   
   data.forEach(d => {
     const tlKey = d.v2_tl || "V2_Default_TL";
     if (!grouped[tlKey]) {
-      grouped[tlKey] = { total: 0, v2_fails: 0, qc_matches: 0, qc_audited_count: 0, expected: 0, actual: 0 };
+      grouped[tlKey] = { total: 0, v2_fails: 0, qc_fails: 0, qc_audited_count: 0, expected: 0, actual: 0 };
     }
     grouped[tlKey].total++;
     
@@ -787,10 +772,8 @@ export const getMetricsByTeamLead = (data: TaskTrackerRow[]) => {
     
     if (isValidAuditor) {
       grouped[tlKey].qc_audited_count++;
-      const isSelectFail = isSelectQcFail(d.selectQcResult);
-      const isErrorFail = isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason);
-      if (isSelectFail === isErrorFail) {
-        grouped[tlKey].qc_matches++;
+      if (isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)) {
+        grouped[tlKey].qc_fails++;
       }
     }
     
@@ -802,7 +785,7 @@ export const getMetricsByTeamLead = (data: TaskTrackerRow[]) => {
     tl: key,
     total: grouped[key].total,
     v2Accuracy: grouped[key].total > 0 ? ((grouped[key].total - grouped[key].v2_fails) / grouped[key].total) * 100 : 100,
-    qcAccuracy: grouped[key].qc_audited_count > 0 ? (grouped[key].qc_matches / grouped[key].qc_audited_count) * 100 : 100,
+    qcAccuracy: grouped[key].total > 0 ? ((grouped[key].total - grouped[key].qc_fails) / grouped[key].total) * 100 : 100,
     efficiency: (grouped[key].actual / grouped[key].expected) * 100
   }));
 };
@@ -944,7 +927,7 @@ export const getLabelerPerformanceSummary = (data: TaskTrackerRow[]) => {
 
 // Gets performance details by STQC QC Auditor
 export const getQcAuditorPerformanceSummary = (data: TaskTrackerRow[]) => {
-  const summary: Record<string, { total: number; qc_matches: number; actual: number; expected: number; cohort: string; tl: string; durationsList: number[]; nuro_defects: number; controllableCount: number; uncontrollableCount: number }> = {};
+  const summary: Record<string, { total: number; qc_fails: number; actual: number; expected: number; cohort: string; tl: string; durationsList: number[]; nuro_defects: number; controllableCount: number; uncontrollableCount: number }> = {};
   
   data.forEach(d => {
     const key = d.qa_user_id ? String(d.qa_user_id).trim() : "";
@@ -956,7 +939,7 @@ export const getQcAuditorPerformanceSummary = (data: TaskTrackerRow[]) => {
     if (!summary[key]) {
       summary[key] = {
         total: 0,
-        qc_matches: 0,
+        qc_fails: 0,
         actual: 0,
         expected: 0,
         cohort: d.stqc_cohort || "STQC_Default_Cohort",
@@ -969,14 +952,8 @@ export const getQcAuditorPerformanceSummary = (data: TaskTrackerRow[]) => {
     }
     summary[key].total++;
     
-    // Check if selectQcResult and QC ERROR CATEGORY share the same value (both agree fail / both agree pass)
-    const isSelectFail = isSelectQcFail(d.selectQcResult);
-    const isErrorFail = isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason);
-    
-    if (isSelectFail === isErrorFail) {
-      summary[key].qc_matches++;
-    } else {
-      // It's a QC error (mismatch with audit or fail to identify error)
+    if (isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)) {
+      summary[key].qc_fails++;
       const stqc_et = String(d.qc_error_type || "").trim().toLowerCase();
       const fr = String(d.failureReason || "").trim().toLowerCase();
 
@@ -1003,7 +980,7 @@ export const getQcAuditorPerformanceSummary = (data: TaskTrackerRow[]) => {
     const stdDev = Math.sqrt(variance);
 
     const total = summary[key].total;
-    const qcAccuracy = total > 0 ? (summary[key].qc_matches / total) * 100 : 100;
+    const qcAccuracy = total > 0 ? ((total - summary[key].qc_fails) / total) * 100 : 100;
     
     // Explicitly calculate denominator based on classified types to match spreadsheet images (Count / Grand Total of Pivot)
     const classifiedTotal = summary[key].controllableCount + summary[key].uncontrollableCount;
