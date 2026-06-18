@@ -127,6 +127,28 @@ const isQcAuditFailValue = (qcErrorCategory?: string, qcErrorCategoryAudit?: str
   return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
 };
 
+const getRagStatus = (score: number) => {
+  if (score >= 85) {
+    return { label: "G", className: "bg-emerald-100 text-emerald-700 border-emerald-200" };
+  }
+  if (score >= 70) {
+    return { label: "A", className: "bg-amber-100 text-amber-700 border-amber-200" };
+  }
+  return { label: "R", className: "bg-red-100 text-red-700 border-red-200" };
+};
+
+const renderScoreWithRag = (score: number, scoreClassName: string) => {
+  const rag = getRagStatus(score);
+  return (
+    <div className="flex items-center justify-center gap-2">
+      <span className={scoreClassName}>{score.toFixed(1)}%</span>
+      <span className={`inline-flex min-w-5 justify-center rounded border px-1.5 py-0.5 text-[9px] font-black ${rag.className}`}>
+        {rag.label}
+      </span>
+    </div>
+  );
+};
+
 interface OperationsDashboardProps {
   onLocationsUpdate?: (locations: string[]) => void;
 }
@@ -2801,7 +2823,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     <tr key={row.week} className="hover:bg-slate-50/70 transition">
                       <td className="px-4 py-3 font-bold text-slate-800">{row.week}</td>
                       <td className="px-3 py-3 text-center font-mono">{row.total}</td>
-                      <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2Score.toFixed(1)}%</td>
+                      <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.v2Score, "font-black text-blue-700")}</td>
                     </tr>
                   ))
                 )}
@@ -2837,7 +2859,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     <tr key={row.week} className="hover:bg-slate-50/70 transition">
                       <td className="px-4 py-3 font-bold text-slate-800">{row.week}</td>
                       <td className="px-3 py-3 text-center font-mono">{row.total}</td>
-                      <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcScore.toFixed(1)}%</td>
+                      <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.qcScore, "font-black text-emerald-700")}</td>
                     </tr>
                   ))
                 )}
@@ -2891,8 +2913,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   <tr key={row.batch} className="hover:bg-slate-50/70 transition">
                     <td className="px-4 py-3 font-bold text-slate-800">{row.batch}</td>
                     <td className="px-3 py-3 text-center font-mono">{row.total}</td>
-                    <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2Score.toFixed(1)}%</td>
-                    <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcScore.toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.v2Score, "font-black text-blue-700")}</td>
+                    <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.qcScore, "font-black text-emerald-700")}</td>
                   </tr>
                 ))
               )}
