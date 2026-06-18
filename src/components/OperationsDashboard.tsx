@@ -250,6 +250,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [selectedCohortStqc, setSelectedCohortStqc] = useState<string>("All"); // STQC Cohort AA
   const [selectedTL, setSelectedTL] = useState<string>("All"); // V2 TL AF
   const [selectedTLStqc, setSelectedTLStqc] = useState<string>("All"); // STQC TL AG
+  const [selectedMember, setSelectedMember] = useState<string>("All"); // V2 member P / STQC member Q
   const [selectedWeek, setSelectedWeek] = useState<string>("All"); // Week Beginning
   const [selectedMonth, setSelectedMonth] = useState<string>("All"); // Month Name
   const [startDate, setStartDate] = useState<string>("");
@@ -349,6 +350,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     return Array.from(new Set(list)).sort();
   }, [taskData]);
 
+  const uniqueMembers = useMemo(() => {
+    const list = taskData
+      .flatMap(d => [d.simteacher_v2_labeler, d.qa_user_id])
+      .filter(Boolean)
+      .map(s => String(s).trim());
+    return ["All", ...Array.from(new Set(list))].sort();
+  }, [taskData]);
+
   const uniqueCohorts = useMemo(() => {
     const list = taskData.map(d => d.v2_cohort).filter(Boolean).map(s => String(s).trim());
     return ["All", ...Array.from(new Set(list))].sort();
@@ -387,6 +396,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (selectedCohortStqc !== "All" && row.stqc_cohort !== selectedCohortStqc) return false;
       if (selectedTL !== "All" && row.v2_tl !== selectedTL) return false;
       if (selectedTLStqc !== "All" && row.stqc_tl !== selectedTLStqc) return false;
+      if (selectedMember !== "All" && row.simteacher_v2_labeler !== selectedMember && row.qa_user_id !== selectedMember) return false;
       if (selectedWeek !== "All" && row.week_beginning !== selectedWeek) return false;
       if (selectedMonth !== "All" && row.month_name !== selectedMonth) return false;
 
@@ -417,6 +427,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     selectedCohortStqc,
     selectedTL,
     selectedTLStqc,
+    selectedMember,
     selectedWeek,
     selectedMonth,
     startDate,
@@ -1674,6 +1685,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   setSelectedCohortStqc("All");
                   setSelectedTL("All");
                   setSelectedTLStqc("All");
+                  setSelectedMember("All");
                   setSelectedWeek("All");
                   setSelectedMonth("All");
                   setStartDate("");
@@ -1761,6 +1773,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 >
                   {uniqueLocations.map(l => (
                     <option key={l} value={l}>{l === "All" ? "All V2/STQC Locations" : l}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* V2 / STQC Member */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">MEMBER FILTER (V2 P / STQC Q)</label>
+                <select
+                  value={selectedMember}
+                  onChange={(e) => setSelectedMember(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  id="member-filter"
+                >
+                  {uniqueMembers.map(member => (
+                    <option key={member} value={member}>{member === "All" ? "All V2/STQC Members" : member}</option>
                   ))}
                 </select>
               </div>
