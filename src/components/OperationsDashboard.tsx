@@ -1429,7 +1429,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       const isSpecialAB = colLetter === "AB";
                       const isSpecialAF = colLetter === "AF";
                       const isSpecialP = colLetter === "P";
-                      const isSpecialAM = colLetter === "AM";
+                      const isSpecialAO = colLetter === "AO";
                       
                       let highlightClass = "bg-white border-slate-200 text-slate-700";
                       let badge = "";
@@ -1455,9 +1455,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       } else if (isSpecialAH) {
                         highlightClass = "bg-rose-50 border-rose-200 text-rose-905 font-medium";
                         badge = "QC ERROR CATEGORY (Col AH)";
-                      } else if (isSpecialAM) {
+                      } else if (isSpecialAO) {
                         highlightClass = "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-905 font-medium";
-                        badge = "LOCATION (Col AM)";
+                        badge = "STQC LOCATION (Col AO)";
                       }
 
                       return (
@@ -1631,9 +1631,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-              {/* GEOGRAPHIC LOCATION */}
+              {/* STQC LOCATION */}
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">GEOGRAPHIC LOCATION (Col AM)</label>
+                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">STQC LOCATION (Col AO)</label>
                 <select
                   value={selectedLocation}
                   onChange={(e) => setSelectedLocation(e.target.value)}
@@ -1641,7 +1641,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   id="location-filter"
                 >
                   {uniqueLocations.map(l => (
-                    <option key={l} value={l}>{l === "All" ? "All Direct Cities (Col AM)" : `Col AM: ${l}`}</option>
+                    <option key={l} value={l}>{l === "All" ? "All STQC Locations (Col AO)" : `Col AO: ${l}`}</option>
                   ))}
                 </select>
               </div>
@@ -2018,7 +2018,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     onClick={() => setRcaTab("location")}
                     className={`px-3 py-1 text-[10px] font-mono font-bold rounded-md transition ${rcaTab === "location" ? "bg-white text-indigo-700 shadow-3xs" : "text-slate-500 hover:text-slate-800"}`}
                   >
-                    CITIES (AM)
+                    STQC LOCATIONS (AO)
                   </button>
                 </div>
               </div>
