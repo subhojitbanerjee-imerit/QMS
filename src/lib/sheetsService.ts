@@ -352,6 +352,11 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
         parsedRow.qc_error_category_audit = valueAH;
       }
 
+      // AJ -> Nuro Findings / Client Result (Index 35)
+      if (row.length > 35 && row[35] !== undefined && row[35] !== "") {
+        parsedRow.nuro_findings = String(row[35]).trim();
+      }
+
       // NO OVERWRITE of failureReason with qc_error_category
       // This was previously causing "Fail", "Pass", "Invalid" to show up on charts.
 

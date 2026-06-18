@@ -548,6 +548,10 @@ const isQcErrorCategoryFail = (qcErrorCategory?: string, qcErrorCategoryAudit?: 
   return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
 };
 
+const normalizeAgreementValue = (value?: string): string => {
+  return String(value || "").trim().toLowerCase();
+};
+
 // Analytical Helper utilities to feed charts and dashboards
 export const getOperationalMetrics = (data: TaskTrackerRow[]) => {
   const total = data.length;
@@ -582,13 +586,20 @@ export const getOperationalMetrics = (data: TaskTrackerRow[]) => {
   const qcFailsGlobal = data.filter(d => isQcErrorCategoryFail(d.qc_error_category, d.qc_error_category_audit, d.failureReason)).length;
   const qcAccuracy = total > 0 ? ((total - qcFailsGlobal) / total) * 100 : 100;
 
-  // 3. CLIENT DEFECT DROP: based on QC ERROR CATEGORY_Based on audit being clean ("none") but Nuro Findings being a reject
-  const clientDefectDropCount = data.filter(d => {
-    const auditClean = !d.qc_error_category || String(d.qc_error_category).trim().toLowerCase() === "none" || String(d.qc_error_category).trim().toLowerCase() === "";
-    const nuroRejected = d.nuro_findings && (String(d.nuro_findings).toLowerCase() === "rejected" || String(d.nuro_findings).toLowerCase() === "correction required");
-    return auditClean && nuroRejected;
+  // 3. CLIENT AGREEMENT: compare QC ERROR CATEGORY_Based on audit (AH) vs Nuro Findings (AJ).
+  // Ignore rows where either AH or AJ is blank. Matching normalized values score as agreement.
+  const clientAgreementRows = data.filter(d => {
+    const auditValue = normalizeAgreementValue(d.qc_error_category || d.qc_error_category_audit);
+    const nuroValue = normalizeAgreementValue(d.nuro_findings);
+    return auditValue !== "" && nuroValue !== "";
+  });
+  const clientAgreementMatchCount = clientAgreementRows.filter(d => {
+    const auditValue = normalizeAgreementValue(d.qc_error_category || d.qc_error_category_audit);
+    const nuroValue = normalizeAgreementValue(d.nuro_findings);
+    return auditValue === nuroValue;
   }).length;
-  const clientDefectDropRate = (clientDefectDropCount / total) * 100;
+  const clientDefectDropCount = clientAgreementRows.length - clientAgreementMatchCount;
+  const clientDefectDropRate = clientAgreementRows.length ? (clientAgreementMatchCount / clientAgreementRows.length) * 100 : 0;
 
   // Normal client defect rate (SLA rejections percentage)
   const clientRejects = data.filter(d => String(d.nuro_findings).toLowerCase() === "rejected").length;

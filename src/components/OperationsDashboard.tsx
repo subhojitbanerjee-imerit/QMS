@@ -1913,44 +1913,44 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <div className="flex items-center gap-2 text-red-600">
                   <AlertTriangle className="w-5 h-5" />
                   <h3 className="text-xs font-mono font-bold tracking-wide uppercase text-slate-800">
-                    CLIENT DEFECT DROP: QC Error Category (AH) vs. Nuro Findings Matrix
+                    AUDIT CLIENT AGREEMENT: QC Error Category (AH) vs. Nuro Findings (AJ)
                   </h3>
                 </div>
                 <span className="bg-red-50 text-red-600 font-mono font-bold text-[10px] px-2 py-0.5 rounded">
-                  {metrics.clientDefectDropRate.toFixed(2)}% True Leakage Rate
+                  {metrics.clientDefectDropRate.toFixed(2)}% Agreement Rate
                 </span>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-xs font-medium">
                 {/* Panel 1: Leaks */}
                 <div className="bg-red-50/50 border border-red-100 rounded-xl p-4 space-y-2">
-                  <p className="font-bold text-red-800 text-xs">⚠️ TRUE DEFECT LEAKS TO NURO</p>
+                  <p className="font-bold text-red-800 text-xs">⚠️ AUDIT CLIENT MISMATCHES</p>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
-                    Auditor labeled the task as <code className="bg-white px-1 py-0.5 rounded border border-red-200">None Error</code> (Passed), but the final client (Nuro Findings) explicitly found defect slips.
+                    Compares nonblank <code className="bg-white px-1 py-0.5 rounded border border-red-200">Col AH</code> against nonblank <code className="bg-white px-1 py-0.5 rounded border border-red-200">Col AJ</code>. Different values are counted as disagreement.
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-red-600 font-display">
                       {metrics.clientDefectDropCount} Task{metrics.clientDefectDropCount === 1 ? "" : "s"}
                     </span>
-                    <span className="text-[10px] text-slate-450 block font-normal">Identified as Client Defect Drop</span>
+                    <span className="text-[10px] text-slate-450 block font-normal">AH/AJ nonmatching rows</span>
                   </div>
                 </div>
 
                 {/* Panel 2: Strict Auditor mismatches */}
                 <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-4 space-y-2">
-                  <p className="font-bold text-amber-800 text-xs text-amber-705">⚠️ AUDIT DEFENSIVE DRIFT</p>
+                  <p className="font-bold text-amber-800 text-xs text-amber-705">⚠️ COMPARED ROWS</p>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
-                    Auditor reported a defect category in <code className="bg-white px-1 py-0.5 rounded border border-amber-150">Col AH</code>, but the Client Accepted the frame as correct without penalty.
+                    Rows where both AH and AJ are available are included in the agreement denominator; blank cells in either column are ignored.
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-amber-600 font-display">
                       {filteredData.filter(d => {
-                        const auditDef = d.qc_error_category && d.qc_error_category.toLowerCase() !== "none" && d.qc_error_category.toLowerCase() !== "";
-                        const clientAcc = d.nuro_findings && d.nuro_findings.toLowerCase() === "accepted";
-                        return auditDef && clientAcc;
+                        const auditValue = String(d.qc_error_category || "").trim();
+                        const nuroValue = String(d.nuro_findings || "").trim();
+                        return auditValue !== "" && nuroValue !== "";
                       }).length} Task(s)
                     </span>
-                    <span className="text-[10px] text-slate-450 block font-normal">Auditor reported defect, client accepted</span>
+                    <span className="text-[10px] text-slate-450 block font-normal">Rows included in AH/AJ comparison</span>
                   </div>
                 </div>
 
@@ -1958,21 +1958,25 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 space-y-2">
                   <p className="font-bold text-emerald-800 text-xs">✅ QA & CLIENT ALIGNMENT</p>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
-                    STQC QC accuracy now uses the audit fail-count rule: fail, failed, reject, or rejected in QC ERROR CATEGORY_Based on audit lowers the score.
+                    Agreement is scored only when normalized AH and AJ values match exactly after trimming and lowercasing.
                   </p>
                   <div className="pt-2">
                     <span className="text-lg font-black text-emerald-600 font-display">
                       {filteredData.filter(d => {
-                        const auditClean = !d.qc_error_category || d.qc_error_category.toLowerCase() === "none" || d.qc_error_category.toLowerCase() === "";
-                        const clientAcc = !d.nuro_findings || d.nuro_findings.toLowerCase() === "accepted";
-                        return (auditClean && clientAcc) || (!auditClean && !clientAcc);
+                        const auditValue = String(d.qc_error_category || "").trim().toLowerCase();
+                        const nuroValue = String(d.nuro_findings || "").trim().toLowerCase();
+                        return auditValue !== "" && nuroValue !== "" && auditValue === nuroValue;
                       }).length} Tasks ({((filteredData.filter(d => {
-                        const auditClean = !d.qc_error_category || d.qc_error_category.toLowerCase() === "none" || d.qc_error_category.toLowerCase() === "";
-                        const clientAcc = !d.nuro_findings || d.nuro_findings.toLowerCase() === "accepted";
-                        return (auditClean && clientAcc) || (!auditClean && !clientAcc);
-                      }).length / (filteredData.length || 1)) * 100).toFixed(1)}%)
+                        const auditValue = String(d.qc_error_category || "").trim().toLowerCase();
+                        const nuroValue = String(d.nuro_findings || "").trim().toLowerCase();
+                        return auditValue !== "" && nuroValue !== "" && auditValue === nuroValue;
+                      }).length / (filteredData.filter(d => {
+                        const auditValue = String(d.qc_error_category || "").trim();
+                        const nuroValue = String(d.nuro_findings || "").trim();
+                        return auditValue !== "" && nuroValue !== "";
+                      }).length || 1)) * 100).toFixed(1)}%)
                     </span>
-                    <span className="text-[10px] text-slate-450 block font-normal">Joint system accuracy consensus rate</span>
+                    <span className="text-[10px] text-slate-450 block font-normal">Audit-client agreement matches</span>
                   </div>
                 </div>
               </div>
