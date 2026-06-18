@@ -482,15 +482,31 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
   const failureReasonsDist = useMemo(() => {
     let data = getFailureReasonsDistribution(filteredData);
-    if (filterV2 === "Controllable") data = data.filter(d => d.controllable);
-    if (filterV2 === "Uncontrollable") data = data.filter(d => !d.controllable);
+    if (filterV2 === "Controllable") {
+      data = data
+        .filter(d => d.controllable > 0)
+        .map(d => ({ ...d, uncontrollable: 0, total: d.controllable }));
+    }
+    if (filterV2 === "Uncontrollable") {
+      data = data
+        .filter(d => d.uncontrollable > 0)
+        .map(d => ({ ...d, controllable: 0, total: d.uncontrollable }));
+    }
     return data;
   }, [filteredData, filterV2]);
 
   const stqcFailureReasonsDist = useMemo(() => {
     let data = getStqcFailureReasonsDistribution(filteredData);
-    if (filterStqc === "Controllable") data = data.filter(d => d.controllable > 0);
-    if (filterStqc === "Uncontrollable") data = data.filter(d => d.uncontrollable > 0);
+    if (filterStqc === "Controllable") {
+      data = data
+        .filter(d => d.controllable > 0)
+        .map(d => ({ ...d, uncontrollable: 0, total: d.controllable }));
+    }
+    if (filterStqc === "Uncontrollable") {
+      data = data
+        .filter(d => d.uncontrollable > 0)
+        .map(d => ({ ...d, controllable: 0, total: d.uncontrollable }));
+    }
     return data;
   }, [filteredData, filterStqc]);
 
