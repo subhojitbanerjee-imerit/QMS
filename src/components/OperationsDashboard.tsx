@@ -468,8 +468,32 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     selectedMonth
   ]);
 
-  // Shared dataset after master filters. Ledger quality bands are applied only inside ledger summaries.
-  const filteredData = useMemo(() => rawFilteredData, [rawFilteredData]);
+  // Shared dataset after master filters and selected distribution bands.
+  const filteredData = useMemo(() => {
+    let result = rawFilteredData;
+
+    if (v2DistFilter !== "All") {
+      const eligibleLabelers = new Set(
+        getLabelerPerformanceSummary(rawFilteredData)
+          .filter(labeler => matchesQualityBand(labeler.v2Accuracy, v2DistFilter))
+          .map(labeler => labeler.labelerId)
+      );
+
+      result = result.filter(row => eligibleLabelers.has(String(row.simteacher_v2_labeler || "").trim()));
+    }
+
+    if (qcDistFilter !== "All") {
+      const eligibleAuditors = new Set(
+        getQcAuditorPerformanceSummary(rawFilteredData)
+          .filter(auditor => matchesQualityBand(auditor.qcAccuracy, qcDistFilter))
+          .map(auditor => auditor.auditorId)
+      );
+
+      result = result.filter(row => eligibleAuditors.has(String(row.qa_user_id || "").trim()));
+    }
+
+    return result;
+  }, [rawFilteredData, v2DistFilter, qcDistFilter]);
 
   // Operational metrics
   const metrics = useMemo(() => {
@@ -670,11 +694,6 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const labelersSummary = useMemo(() => {
     let base = getLabelerPerformanceSummary(filteredData);
 
-    // Apply distribution filter
-    if (v2DistFilter !== "All") {
-      base = base.filter(l => matchesQualityBand(l.v2Accuracy, v2DistFilter));
-    }
-
     // Apply sorting
     if (v2SortConfig !== null) {
       base.sort((a, b) => {
@@ -686,15 +705,10 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       });
     }
     return base;
-  }, [filteredData, v2SortConfig, v2DistFilter]);
+  }, [filteredData, v2SortConfig]);
 
   const qcAuditorsSummary = useMemo(() => {
     let base = getQcAuditorPerformanceSummary(filteredData);
-
-    // Apply distribution filter
-    if (qcDistFilter !== "All") {
-      base = base.filter(l => matchesQualityBand(l.qcAccuracy, qcDistFilter));
-    }
 
     // Apply sorting
     if (qcSortConfig !== null) {
@@ -707,7 +721,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       });
     }
     return base;
-  }, [filteredData, qcSortConfig, qcDistFilter]);
+  }, [filteredData, qcSortConfig]);
 
   const advancedAnalytics = useMemo(() => {
     const rawWeeks = Array.from(new Set(filteredData.map(d => d.week_beginning).filter(Boolean)));
