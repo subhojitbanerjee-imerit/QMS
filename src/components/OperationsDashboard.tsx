@@ -52,7 +52,6 @@ import {
   Filter,
   ChevronUp,
   ChevronDown,
-  Calendar,
   Info
 } from "lucide-react";
 import jsPDF from "jspdf";
@@ -288,14 +287,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [selectedMember, setSelectedMember] = useState<string>("All"); // V2 member P / STQC member Q
   const [selectedWeek, setSelectedWeek] = useState<string>("All"); // Week Beginning
   const [selectedMonth, setSelectedMonth] = useState<string>("All"); // Month Name
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
 
   // Tab selections
   const [distributionTab, setDistributionTab] = useState<"v2" | "qc">("v2");
   const [rcaTab, setRcaTab] = useState<"cohort" | "tl" | "location">("cohort");
   const [advancedAnalysisTab, setAdvancedAnalysisTab] = useState<"v2" | "stqc">("v2");
-  const [reasonMatrixWeekFilter, setReasonMatrixWeekFilter] = useState<string>("");
   const [batchWeekFilter, setBatchWeekFilter] = useState<string>("All");
   const [stqcErrorTypeFilter, setStqcErrorTypeFilter] = useState<"All" | "Controllable" | "Uncontrollable">("All");
   const [v2ErrorTypeFilter, setV2ErrorTypeFilter] = useState<"All" | "Controllable" | "Uncontrollable">("All");
@@ -435,24 +431,6 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       if (selectedWeek !== "All" && row.week_beginning !== selectedWeek) return false;
       if (selectedMonth !== "All" && row.month_name !== selectedMonth) return false;
 
-      // Custom date range bounds use qa_response_end_date_ist (Col U)
-      if (startDate) {
-        const rowDateStr = row.qa_response_end_date_ist || row.nuro_review_date;
-        if (rowDateStr) {
-          const rowD = new Date(rowDateStr);
-          const startD = new Date(startDate);
-          if (!isNaN(rowD.getTime()) && !isNaN(startD.getTime()) && rowD < startD) return false;
-        }
-      }
-      if (endDate) {
-        const rowDateStr = row.qa_response_end_date_ist || row.nuro_review_date;
-        if (rowDateStr) {
-          const rowD = new Date(rowDateStr);
-          const endD = new Date(endDate);
-          if (!isNaN(rowD.getTime()) && !isNaN(endD.getTime()) && rowD > endD) return false;
-        }
-      }
-
       return true;
     });
   }, [
@@ -464,9 +442,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     selectedTLStqc,
     selectedMember,
     selectedWeek,
-    selectedMonth,
-    startDate,
-    endDate
+    selectedMonth
   ]);
 
   // Secondary filtering for distribution
@@ -597,12 +573,10 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         ? `WB: ${selectedWeek}`
         : selectedMonth !== "All"
           ? `Month: ${selectedMonth}`
-          : startDate || endDate
-            ? `Date Range: ${startDate || "Start"} to ${endDate || "End"}`
-            : "Current active filters",
+          : "Current active filters",
       rows
     };
-  }, [filteredData, selectedWeek, selectedMonth, startDate, endDate]);
+  }, [filteredData, selectedWeek, selectedMonth]);
 
   const locationChartsData = useMemo(() => {
     return getMetricsByLocation(filteredData);
@@ -610,7 +584,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
   const batchScoreRows = useMemo(() => {
     const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
-    taskData.forEach(row => {
+    filteredData.forEach(row => {
       if (batchWeekFilter !== "All" && row.week_beginning !== batchWeekFilter) return;
       const batch = String(row.batch_id || "").trim();
       if (!batch || batch.toLowerCase() === "none" || batch.toLowerCase() === "null") return;
@@ -630,11 +604,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         qcScore: value.total ? ((value.total - value.qcFails) / value.total) * 100 : 0
       }))
       .sort((a, b) => a.batch.localeCompare(b.batch));
-  }, [taskData, batchWeekFilter]);
+  }, [filteredData, batchWeekFilter]);
 
   const weeklyScoreRows = useMemo(() => {
     const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
-    taskData.forEach(row => {
+    filteredData.forEach(row => {
       const week = String(row.week_beginning || "").trim();
       if (!week || week.toLowerCase() === "none" || week.toLowerCase() === "null") return;
       if (!grouped[week]) grouped[week] = { total: 0, v2Fails: 0, qcFails: 0 };
@@ -657,7 +631,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         return b.week.localeCompare(a.week);
       })
       .slice(0, 8);
-  }, [taskData]);
+  }, [filteredData]);
 
   const v2CohortChartsData = useMemo(() => {
     return getMetricsByCohort(filteredData, 'v2_cohort');
@@ -760,17 +734,17 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   }, [filteredData, qcSortConfig, qcDistFilter]);
 
   const advancedAnalytics = useMemo(() => {
-    const rawWeeks = Array.from(new Set(taskData.map(d => d.week_beginning).filter(Boolean)));
+    const rawWeeks = Array.from(new Set(filteredData.map(d => d.week_beginning).filter(Boolean)));
     const sortedWeeks = rawWeeks.sort((a, b) => new Date(a as string).getTime() - new Date(b as string).getTime());
     const displayWeeks = sortedWeeks.slice(-6);
 
-    const v2Locations = Array.from(new Set(taskData.map(d => d.location).filter(Boolean))).sort();
-    const stqcLocations = Array.from(new Set(taskData.map(d => d.stqc_location).filter(Boolean))).sort();
+    const v2Locations = Array.from(new Set(filteredData.map(d => d.location).filter(Boolean))).sort();
+    const stqcLocations = Array.from(new Set(filteredData.map(d => d.stqc_location).filter(Boolean))).sort();
     
     // V2 TLS
-    const v2tls = Array.from(new Set(taskData.map(d => d.v2_tl).filter(Boolean))).sort();
+    const v2tls = Array.from(new Set(filteredData.map(d => d.v2_tl).filter(Boolean))).sort();
     // STQC TLS
-    const stqcTls = Array.from(new Set(taskData.map(d => d.stqc_tl).filter(Boolean))).sort();
+    const stqcTls = Array.from(new Set(filteredData.map(d => d.stqc_tl).filter(Boolean))).sort();
 
     // V2 Data structures
     const locWeeklyV2: Record<string, Record<string, { total: number; controllable: number }>> = {};
@@ -882,18 +856,23 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         grandTotals: weeklyGrandTotalsStqc
       }
     };
-  }, [filteredData, taskData]);
+  }, [filteredData]);
+
+  const activeAdvancedWeek = useMemo(() => {
+    if (selectedWeek !== "All") return selectedWeek;
+    return advancedAnalytics.displayWeeks[advancedAnalytics.displayWeeks.length - 1] || "";
+  }, [advancedAnalytics.displayWeeks, selectedWeek]);
 
   // STQC Pivot Matrix Calculation with Filters
   const stqcPivotData = useMemo(() => {
-    if (!reasonMatrixWeekFilter) return null;
+    if (!activeAdvancedWeek) return null;
 
     const matrix: Record<string, Record<string, number>> = {}; // [Reason][Location]
     const columnTotals: Record<string, number> = {}; // [Reason] total count
 
     filteredData.forEach(row => {
       const w = row.week_beginning;
-      if (w !== reasonMatrixWeekFilter) return;
+      if (w !== activeAdvancedWeek) return;
 
       const qcTypeValue = String(row.qc_error_type || "").trim();
       if (qcTypeValue === "" || qcTypeValue.toLowerCase() === "none") return;
@@ -915,18 +894,18 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     });
 
     return { matrix, columnTotals };
-  }, [filteredData, reasonMatrixWeekFilter, stqcErrorTypeFilter]);
+  }, [filteredData, activeAdvancedWeek, stqcErrorTypeFilter]);
 
   // V2 Pivot Matrix Calculation with Filters
   const v2PivotData = useMemo(() => {
-    if (!reasonMatrixWeekFilter) return null;
+    if (!activeAdvancedWeek) return null;
 
     const matrix: Record<string, Record<string, number>> = {}; // [Reason][Location]
     const columnTotals: Record<string, number> = {}; // [Reason] total count
 
     filteredData.forEach(row => {
       const w = row.week_beginning;
-      if (w !== reasonMatrixWeekFilter) return;
+      if (w !== activeAdvancedWeek) return;
 
       // Extract V2 specific controllable status
       const v2_ctrl = getV2TypeBucket(row.v2_error_type);
@@ -948,7 +927,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     });
 
     return { matrix, columnTotals };
-  }, [filteredData, reasonMatrixWeekFilter, v2ErrorTypeFilter]);
+  }, [filteredData, activeAdvancedWeek, v2ErrorTypeFilter]);
 
   const getAnalyticalColor = (pct: number, type: 'controllable' | 'uncontrollable' | 'dist') => {
     if (isNaN(pct) || pct === undefined) return "bg-slate-50 text-slate-300";
@@ -1371,12 +1350,6 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const uniqueFailureReasonsV2 = useMemo(() => {
     return Array.from(new Set(taskData.map(d => d.failureReason).filter(r => r && r !== "None"))).sort();
   }, [taskData]);
-
-  useEffect(() => {
-    if (advancedAnalytics.displayWeeks.length > 0 && !reasonMatrixWeekFilter) {
-      setReasonMatrixWeekFilter(advancedAnalytics.displayWeeks[advancedAnalytics.displayWeeks.length - 1]);
-    }
-  }, [advancedAnalytics.displayWeeks, reasonMatrixWeekFilter]);
 
   // Sync selected labelers with dynamic loaded dataset so we avoid hardcoded defaults if labeler names differ
   useEffect(() => {
@@ -1802,8 +1775,6 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   setSelectedMember("All");
                   setSelectedWeek("All");
                   setSelectedMonth("All");
-                  setStartDate("");
-                  setEndDate("");
                   setV2DistFilter("All");
                   setQcDistFilter("All");
                 }}
@@ -1947,26 +1918,6 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     <option key={m} value={m}>{m === "All" ? "All Months" : m}</option>
                   ))}
                 </select>
-              </div>
-
-              {/* Custom Date Ranges */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">DATE RANGE (CUSTOM)</label>
-                <div className="flex items-center gap-2 h-10">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] rounded-lg p-2 w-full focus:border-indigo-500 outline-none font-medium h-full"
-                  />
-                  <span className="text-slate-400 font-mono text-xs">to</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] rounded-lg p-2 w-full focus:border-indigo-500 outline-none font-medium h-full"
-                  />
-                </div>
               </div>
 
               {/* Precision Distribution Filter (V2) */}
@@ -3359,29 +3310,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 Multi-dimensional performance mapping across locations, team leaders, and failure segments comparing V2 First-Pass vs STQC Audit results.
               </p>
             </div>
-            
-            <div className="flex items-center gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xl">
-               <div className="flex items-center gap-2 px-4 text-slate-500 font-bold text-[10px] uppercase border-r border-slate-200">
-                 <Calendar className="w-5 h-5 text-indigo-600" />
-                 <span>SELECT ANALYTICAL WEEK</span>
-               </div>
-               <select 
-                 className="text-sm font-bold text-slate-900 bg-transparent py-1.5 px-4 focus:ring-0 cursor-pointer appearance-none pr-8"
-                 value={reasonMatrixWeekFilter}
-                 onChange={(e) => setReasonMatrixWeekFilter(e.target.value)}
-                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1.25rem' }}
-               >
-                 {advancedAnalytics.displayWeeks.map(w => {
-                   let display = w;
-                   try {
-                     const date = new Date(w);
-                     if (!isNaN(date.getTime())) {
-                       display = date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-                     }
-                   } catch (e) {}
-                   return <option key={w} value={w}>WB: {display}</option>;
-                 })}
-               </select>
+            <div className="bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-xl text-[10px] font-mono font-bold uppercase text-slate-500">
+              Master WB: <span className="text-slate-900">{activeAdvancedWeek || "No Week Available"}</span>
             </div>
           </div>
 
@@ -3394,7 +3324,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   LOCATION-WISE ERROR DISTRIBUTION (V2 vs STQC) %
                 </h3>
                 <p className="text-sm text-slate-500 font-medium ml-5">
-                  Regional comparative analysis showing each location's share of controllable and uncontrollable errors for <strong>WB: {reasonMatrixWeekFilter}</strong>.
+                  Regional comparative analysis showing each location's share of controllable and uncontrollable errors for <strong>WB: {activeAdvancedWeek}</strong>.
                 </p>
               </div>
 
@@ -3417,8 +3347,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       </thead>
                       <tbody>
                         {advancedAnalytics.v2Locations.map(loc => {
-                          const data = advancedAnalytics.v2.locWeekly[loc]?.[reasonMatrixWeekFilter];
-                          const gTotal = advancedAnalytics.v2.grandTotals[reasonMatrixWeekFilter];
+                          const data = advancedAnalytics.v2.locWeekly[loc]?.[activeAdvancedWeek];
+                          const gTotal = advancedAnalytics.v2.grandTotals[activeAdvancedWeek];
                           
                           const ctrlPct = (data && gTotal && gTotal.controllable > 0) ? (data.controllable / gTotal.controllable) * 100 : 0;
                           const unctrlPct = (data && gTotal && (gTotal.total - gTotal.controllable) > 0) 
@@ -3463,8 +3393,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       </thead>
                       <tbody>
                         {advancedAnalytics.stqcLocations.map(loc => {
-                          const data = advancedAnalytics.stqc.locWeekly[loc]?.[reasonMatrixWeekFilter];
-                          const gTotal = advancedAnalytics.stqc.grandTotals[reasonMatrixWeekFilter];
+                          const data = advancedAnalytics.stqc.locWeekly[loc]?.[activeAdvancedWeek];
+                          const gTotal = advancedAnalytics.stqc.grandTotals[activeAdvancedWeek];
                           
                           const ctrlPct = (data && gTotal && gTotal.controllable > 0) ? (data.controllable / gTotal.controllable) * 100 : 0;
                           const unctrlPct = (data && gTotal && (gTotal.total - gTotal.controllable) > 0) 
@@ -3501,7 +3431,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   TL-WISE ERROR DISTRIBUTION (V2 vs STQC) %
                 </h3>
                 <p className="text-sm text-slate-500 font-medium ml-5">
-                  Strategic team-leader perspective on error attribution comparing vertical distribution for <strong>WB: {reasonMatrixWeekFilter}</strong>.
+                  Strategic team-leader perspective on error attribution comparing vertical distribution for <strong>WB: {activeAdvancedWeek}</strong>.
                 </p>
               </div>
 
@@ -3522,8 +3452,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       </thead>
                       <tbody>
                         {advancedAnalytics.v2.tls.map(tl => {
-                          const data = advancedAnalytics.v2.tlWeekly[tl]?.[reasonMatrixWeekFilter];
-                          const gTotal = advancedAnalytics.v2.grandTotals[reasonMatrixWeekFilter];
+                          const data = advancedAnalytics.v2.tlWeekly[tl]?.[activeAdvancedWeek];
+                          const gTotal = advancedAnalytics.v2.grandTotals[activeAdvancedWeek];
                           
                           const ctrlPct = (data && gTotal && gTotal.controllable > 0) ? (data.controllable / gTotal.controllable) * 100 : 0;
                           const unctrlPct = (data && gTotal && (gTotal.total - gTotal.controllable) > 0) 
@@ -3563,8 +3493,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                       </thead>
                       <tbody>
                         {advancedAnalytics.stqc.tls.map(tl => {
-                          const data = advancedAnalytics.stqc.tlWeekly[tl]?.[reasonMatrixWeekFilter];
-                          const gTotal = advancedAnalytics.stqc.grandTotals[reasonMatrixWeekFilter];
+                          const data = advancedAnalytics.stqc.tlWeekly[tl]?.[activeAdvancedWeek];
+                          const gTotal = advancedAnalytics.stqc.grandTotals[activeAdvancedWeek];
                           
                           const ctrlPct = (data && gTotal && gTotal.controllable > 0) ? (data.controllable / gTotal.controllable) * 100 : 0;
                           const unctrlPct = (data && gTotal && (gTotal.total - gTotal.controllable) > 0) 
@@ -3598,7 +3528,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   FAILURE REASON DISTRIBUTION OVER-LOCATION %
                 </h3>
                 <p className="text-sm text-slate-500 font-medium ml-5">
-                  Comparative breakdown of specific failure types across locations for <strong>WB: {reasonMatrixWeekFilter}</strong>.
+                  Comparative breakdown of specific failure types across locations for <strong>WB: {activeAdvancedWeek}</strong>.
                 </p>
               </div>
 
@@ -3644,7 +3574,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto">
                               <Info className="w-8 h-8 text-slate-300" />
                             </div>
-                            <p className="text-slate-400 font-medium italic">No V2 failure data recorded matching these filters for {reasonMatrixWeekFilter}</p>
+                            <p className="text-slate-400 font-medium italic">No V2 failure data recorded matching these filters for {activeAdvancedWeek}</p>
                           </div>
                         );
                       }
@@ -3735,7 +3665,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto">
                               <Info className="w-8 h-8 text-slate-300" />
                             </div>
-                            <p className="text-slate-400 font-medium italic">No STQC data recorded matching these filters for {reasonMatrixWeekFilter}</p>
+                            <p className="text-slate-400 font-medium italic">No STQC data recorded matching these filters for {activeAdvancedWeek}</p>
                           </div>
                         );
                       }
