@@ -126,6 +126,11 @@ const isQcAuditFailValue = (qcErrorCategory?: string, qcErrorCategoryAudit?: str
   return val === "fail" || val === "failed" || val === "reject" || val === "rejected";
 };
 
+const hasAuditValue = (value?: string): boolean => {
+  const val = String(value || "").trim().toLowerCase();
+  return val !== "" && val !== "none" && val !== "null" && val !== "undefined" && val !== "na" && val !== "n/a";
+};
+
 const getRagStatus = (score: number) => {
   if (score >= 85) {
     return { label: "G", className: "bg-emerald-100 text-emerald-700 border-emerald-200" };
@@ -583,15 +588,17 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   }, [filteredData]);
 
   const batchScoreRows = useMemo(() => {
-    const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
+    const grouped: Record<string, { total: number; v2Fails: number; qcFails: number; v2Audits: number; qcAudits: number }> = {};
     filteredData.forEach(row => {
       if (batchWeekFilter !== "All" && row.week_beginning !== batchWeekFilter) return;
       const batch = String(row.batch_id || "").trim();
       if (!batch || batch.toLowerCase() === "none" || batch.toLowerCase() === "null") return;
-      if (!grouped[batch]) grouped[batch] = { total: 0, v2Fails: 0, qcFails: 0 };
+      if (!grouped[batch]) grouped[batch] = { total: 0, v2Fails: 0, qcFails: 0, v2Audits: 0, qcAudits: 0 };
       grouped[batch].total++;
       if (isSelectQcFailValue(row.selectQcResult)) grouped[batch].v2Fails++;
       if (isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason)) grouped[batch].qcFails++;
+      if (hasAuditValue(row.v2_error_type)) grouped[batch].v2Audits++;
+      if (hasAuditValue(row.qc_error_type)) grouped[batch].qcAudits++;
     });
 
     return Object.entries(grouped)
@@ -600,11 +607,32 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         total: value.total,
         v2Fails: value.v2Fails,
         qcFails: value.qcFails,
+        v2Audits: value.v2Audits,
+        qcAudits: value.qcAudits,
         v2Score: value.total ? ((value.total - value.v2Fails) / value.total) * 100 : 0,
-        qcScore: value.total ? ((value.total - value.qcFails) / value.total) * 100 : 0
+        qcScore: value.total ? ((value.total - value.qcFails) / value.total) * 100 : 0,
+        v2AuditPct: value.total ? (value.v2Audits / value.total) * 100 : 0,
+        qcAuditPct: value.total ? (value.qcAudits / value.total) * 100 : 0
       }))
       .sort((a, b) => a.batch.localeCompare(b.batch));
   }, [filteredData, batchWeekFilter]);
+
+  const batchAuditSummary = useMemo(() => {
+    const totals = batchScoreRows.reduce(
+      (acc, row) => ({
+        total: acc.total + row.total,
+        v2Audits: acc.v2Audits + row.v2Audits,
+        qcAudits: acc.qcAudits + row.qcAudits
+      }),
+      { total: 0, v2Audits: 0, qcAudits: 0 }
+    );
+
+    return {
+      total: totals.total,
+      v2AuditPct: totals.total ? (totals.v2Audits / totals.total) * 100 : 0,
+      qcAuditPct: totals.total ? (totals.qcAudits / totals.total) * 100 : 0
+    };
+  }, [batchScoreRows]);
 
   const weeklyScoreRows = useMemo(() => {
     const grouped: Record<string, { total: number; v2Fails: number; qcFails: number }> = {};
@@ -2963,6 +2991,24 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </select>
           </label>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+            <p className="text-[10px] font-mono font-black uppercase tracking-wide text-blue-700">V2 Audit %</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-3xl font-black text-blue-800">{batchAuditSummary.v2AuditPct.toFixed(1)}%</span>
+              <span className="text-[11px] font-mono font-bold text-blue-600">AD filled</span>
+            </div>
+            <p className="mt-1 text-[11px] font-medium text-blue-700/80">Based on nonblank V2 ERROR TYPE (Col AD) across selected batch WB rows.</p>
+          </div>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+            <p className="text-[10px] font-mono font-black uppercase tracking-wide text-emerald-700">QC Audit %</p>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-3xl font-black text-emerald-800">{batchAuditSummary.qcAuditPct.toFixed(1)}%</span>
+              <span className="text-[11px] font-mono font-bold text-emerald-600">AC filled</span>
+            </div>
+            <p className="mt-1 text-[11px] font-medium text-emerald-700/80">Based on nonblank QC Error Type (Col AC) across selected batch WB rows.</p>
+          </div>
+        </div>
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full text-left text-xs text-slate-650">
             <thead className="bg-slate-50 border-b border-slate-200 font-mono text-[10px] text-slate-500 uppercase">
@@ -2971,12 +3017,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <th className="px-3 py-3 text-center font-extrabold">Tasks</th>
                 <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Score</th>
                 <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Score</th>
+                <th className="px-3 py-3 text-center font-extrabold text-blue-700">V2 Audit %</th>
+                <th className="px-3 py-3 text-center font-extrabold text-emerald-700">QC Audit %</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {batchScoreRows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400 italic">No batch data available for selected WB.</td>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400 italic">No batch data available for selected WB.</td>
                 </tr>
               ) : (
                 batchScoreRows.map(row => (
@@ -2985,6 +3033,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     <td className="px-3 py-3 text-center font-mono">{row.total}</td>
                     <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.v2Score, "font-black text-blue-700")}</td>
                     <td className="px-3 py-3 text-center font-mono">{renderScoreWithRag(row.qcScore, "font-black text-emerald-700")}</td>
+                    <td className="px-3 py-3 text-center font-mono font-black text-blue-700">{row.v2AuditPct.toFixed(1)}%</td>
+                    <td className="px-3 py-3 text-center font-mono font-black text-emerald-700">{row.qcAuditPct.toFixed(1)}%</td>
                   </tr>
                 ))
               )}
