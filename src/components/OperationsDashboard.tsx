@@ -155,6 +155,19 @@ const formatWeekShort = (week: string): string => {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
+const getMultiSelectValues = (select: HTMLSelectElement): string[] => {
+  const values = Array.from(select.selectedOptions).map(option => option.value);
+  return values.includes("All") || values.length === 0 ? ["All"] : values;
+};
+
+const matchesSelection = (selected: string[], value?: string): boolean => {
+  return selected.includes("All") || selected.includes(String(value || "").trim());
+};
+
+const formatSelectionLabel = (selected: string[], fallback: string): string => {
+  return selected.includes("All") ? fallback : selected.join(", ");
+};
+
 const getRagStatus = (score: number) => {
   if (score >= 85) {
     return { label: "G", className: "bg-emerald-100 text-emerald-700 border-emerald-200" };
@@ -308,14 +321,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   };
 
   // Analytical Filters
-  const [selectedLocation, setSelectedLocation] = useState<string>("All");
-  const [selectedCohort, setSelectedCohort] = useState<string>("All"); // V2 Cohort AB
-  const [selectedCohortStqc, setSelectedCohortStqc] = useState<string>("All"); // STQC Cohort AA
-  const [selectedTL, setSelectedTL] = useState<string>("All"); // V2 TL AF
-  const [selectedTLStqc, setSelectedTLStqc] = useState<string>("All"); // STQC TL AG
-  const [selectedMember, setSelectedMember] = useState<string>("All"); // V2 member P / STQC member Q
-  const [selectedWeek, setSelectedWeek] = useState<string>("All"); // Week Beginning
-  const [selectedMonth, setSelectedMonth] = useState<string>("All"); // Month Name
+  const [selectedLocation, setSelectedLocation] = useState<string[]>(["All"]);
+  const [selectedCohort, setSelectedCohort] = useState<string[]>(["All"]); // V2 Cohort AB
+  const [selectedCohortStqc, setSelectedCohortStqc] = useState<string[]>(["All"]); // STQC Cohort AA
+  const [selectedTL, setSelectedTL] = useState<string[]>(["All"]); // V2 TL AF
+  const [selectedTLStqc, setSelectedTLStqc] = useState<string[]>(["All"]); // STQC TL AG
+  const [selectedMember, setSelectedMember] = useState<string[]>(["All"]); // V2 member P / STQC member Q
+  const [selectedWeek, setSelectedWeek] = useState<string[]>(["All"]); // Week Beginning
+  const [selectedMonth, setSelectedMonth] = useState<string[]>(["All"]); // Month Name
 
   // Tab selections
   const [distributionTab, setDistributionTab] = useState<"v2" | "qc">("v2");
@@ -451,14 +464,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   // Filter raw dataset based on fully custom metrics
   const rawFilteredData = useMemo(() => {
     return taskData.filter((row) => {
-      if (selectedLocation !== "All" && row.location !== selectedLocation && row.stqc_location !== selectedLocation) return false;
-      if (selectedCohort !== "All" && row.v2_cohort !== selectedCohort) return false;
-      if (selectedCohortStqc !== "All" && row.stqc_cohort !== selectedCohortStqc) return false;
-      if (selectedTL !== "All" && row.v2_tl !== selectedTL) return false;
-      if (selectedTLStqc !== "All" && row.stqc_tl !== selectedTLStqc) return false;
-      if (selectedMember !== "All" && row.simteacher_v2_labeler !== selectedMember && row.qa_user_id !== selectedMember) return false;
-      if (selectedWeek !== "All" && row.week_beginning !== selectedWeek) return false;
-      if (selectedMonth !== "All" && row.month_name !== selectedMonth) return false;
+      if (!selectedLocation.includes("All") && !matchesSelection(selectedLocation, row.location) && !matchesSelection(selectedLocation, row.stqc_location)) return false;
+      if (!matchesSelection(selectedCohort, row.v2_cohort)) return false;
+      if (!matchesSelection(selectedCohortStqc, row.stqc_cohort)) return false;
+      if (!matchesSelection(selectedTL, row.v2_tl)) return false;
+      if (!matchesSelection(selectedTLStqc, row.stqc_tl)) return false;
+      if (!selectedMember.includes("All") && !matchesSelection(selectedMember, row.simteacher_v2_labeler) && !matchesSelection(selectedMember, row.qa_user_id)) return false;
+      if (!matchesSelection(selectedWeek, row.week_beginning)) return false;
+      if (!matchesSelection(selectedMonth, row.month_name)) return false;
 
       return true;
     });
@@ -568,10 +581,10 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         const hasFailureReason = String(row.failureReason || "").trim().toLowerCase() !== "none" && String(row.failureReason || "").trim() !== "";
         return isSelectQcFailValue(row.selectQcResult) || isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason) || hasFailureReason;
       }).length,
-      scope: selectedWeek !== "All"
-        ? `WB: ${selectedWeek}`
-        : selectedMonth !== "All"
-          ? `Month: ${selectedMonth}`
+      scope: !selectedWeek.includes("All")
+        ? `WB: ${selectedWeek.join(", ")}`
+        : !selectedMonth.includes("All")
+          ? `Month: ${selectedMonth.join(", ")}`
           : "Current active filters",
       rows
     };
@@ -939,7 +952,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   }, [filteredData]);
 
   const activeAdvancedWeek = useMemo(() => {
-    if (selectedWeek !== "All") return selectedWeek;
+    if (!selectedWeek.includes("All") && selectedWeek.length === 1) return selectedWeek[0];
     return advancedAnalytics.displayWeeks[advancedAnalytics.displayWeeks.length - 1] || "";
   }, [advancedAnalytics.displayWeeks, selectedWeek]);
 
@@ -1456,9 +1469,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           errorCategory: rcaErrorCategory,
-          cohort: selectedCohort === "All" ? "Cohort_Alpha" : selectedCohort,
-          tl: selectedTL === "All" ? "TL_Anil" : selectedTL,
-          location: selectedLocation === "All" ? "Phoenix" : selectedLocation,
+          cohort: formatSelectionLabel(selectedCohort, "Cohort_Alpha"),
+          tl: formatSelectionLabel(selectedTL, "TL_Anil"),
+          location: formatSelectionLabel(selectedLocation, "Phoenix"),
           details: {
             filteredTotalCount: filteredData.length,
             errorCategoryMetricsPercent: failureReasonsDist.find(f => f.reason === rcaErrorCategory)?.count || 5,
@@ -1523,8 +1536,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          location: selectedLocation,
-          cohort: selectedCohort,
+          location: formatSelectionLabel(selectedLocation, "All Locations"),
+          cohort: formatSelectionLabel(selectedCohort, "All Cohorts"),
           v2Accuracy: metrics.v2Accuracy / 100,
           qcAccuracy: metrics.qcAccuracy / 100,
           nuroDefects: metrics.clientDefectRate / 100,
@@ -1843,18 +1856,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2 text-indigo-700 font-display font-extrabold uppercase text-xs tracking-wider">
                 <Sliders className="w-4 h-4" />
-                <h3>Quality Metric Multi-Filter System</h3>
+                <div>
+                  <h3>Quality Metric Multi-Filter System</h3>
+                  <p className="text-[10px] font-mono font-semibold text-slate-400 normal-case tracking-normal mt-0.5">Ctrl/Cmd-click to select multiple values.</p>
+                </div>
               </div>
               <button
                 onClick={() => {
-                  setSelectedLocation("All");
-                  setSelectedCohort("All");
-                  setSelectedCohortStqc("All");
-                  setSelectedTL("All");
-                  setSelectedTLStqc("All");
-                  setSelectedMember("All");
-                  setSelectedWeek("All");
-                  setSelectedMonth("All");
+                  setSelectedLocation(["All"]);
+                  setSelectedCohort(["All"]);
+                  setSelectedCohortStqc(["All"]);
+                  setSelectedTL(["All"]);
+                  setSelectedTLStqc(["All"]);
+                  setSelectedMember(["All"]);
+                  setSelectedWeek(["All"]);
+                  setSelectedMonth(["All"]);
                   setV2DistFilter("All");
                   setQcDistFilter("All");
                 }}
@@ -1870,8 +1886,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LABELER COHORT (V2 - AB)</label>
                 <select
                   value={selectedCohort}
-                  onChange={(e) => setSelectedCohort(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedCohort(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="v2-cohort-filter"
                 >
                   {uniqueCohorts.map(c => (
@@ -1885,8 +1902,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LABELER COHORT (STQC - AA)</label>
                 <select
                   value={selectedCohortStqc}
-                  onChange={(e) => setSelectedCohortStqc(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedCohortStqc(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="stqc-cohort-filter"
                 >
                   {uniqueCohortsStqc.map(c => (
@@ -1900,8 +1918,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">V2 TEAM LEAD (Col AF)</label>
                 <select
                   value={selectedTL}
-                  onChange={(e) => setSelectedTL(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedTL(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="v2-tl-filter"
                 >
                   {uniqueTLs.map(t => (
@@ -1915,8 +1934,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">STQC TEAM LEAD (Col AG)</label>
                 <select
                   value={selectedTLStqc}
-                  onChange={(e) => setSelectedTLStqc(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedTLStqc(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="stqc-tl-filter"
                 >
                   {uniqueTLsStqc.map(t => (
@@ -1932,8 +1952,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LOCATION FILTER (V2 AM / STQC AO)</label>
                 <select
                   value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedLocation(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="location-filter"
                 >
                   {uniqueLocations.map(l => (
@@ -1947,8 +1968,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">MEMBER FILTER (V2 P / STQC Q)</label>
                 <select
                   value={selectedMember}
-                  onChange={(e) => setSelectedMember(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedMember(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="member-filter"
                 >
                   {uniqueMembers.map(member => (
@@ -1962,8 +1984,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">WEEK BEGINNING</label>
                 <select
                   value={selectedWeek}
-                  onChange={(e) => setSelectedWeek(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedWeek(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="week-filter"
                 >
                   {uniqueWeeks.map(w => {
@@ -1990,8 +2013,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">MONTH</label>
                 <select
                   value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold"
+                  onChange={(e) => setSelectedMonth(getMultiSelectValues(e.currentTarget))}
+                  multiple
+                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
                   id="month-filter"
                 >
                   {uniqueMonths.map(m => (
