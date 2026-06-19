@@ -155,11 +155,6 @@ const formatWeekShort = (week: string): string => {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
-const getMultiSelectValues = (select: HTMLSelectElement): string[] => {
-  const values = Array.from(select.selectedOptions).map(option => option.value);
-  return values.includes("All") || values.length === 0 ? ["All"] : values;
-};
-
 const matchesSelection = (selected: string[], value?: string): boolean => {
   return selected.includes("All") || selected.includes(String(value || "").trim());
 };
@@ -460,6 +455,43 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     const list = taskData.map(d => d.month_name).filter(Boolean).map(s => String(s).trim());
     return ["All", ...Array.from(new Set(list))].sort();
   }, [taskData]);
+
+  const toggleFilterValue = (selected: string[], value: string): string[] => {
+    if (value === "All") return ["All"];
+    const withoutAll = selected.filter(item => item !== "All");
+    const next = withoutAll.includes(value)
+      ? withoutAll.filter(item => item !== value)
+      : [...withoutAll, value];
+    return next.length === 0 ? ["All"] : next;
+  };
+
+  const renderCheckboxFilter = (
+    label: string,
+    options: string[],
+    selected: string[],
+    onChange: (next: string[]) => void,
+    getLabel: (value: string) => string
+  ) => (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">{label}</label>
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 h-28 overflow-y-auto space-y-1">
+        {options.map(option => {
+          const checked = selected.includes(option);
+          return (
+            <label key={option} className="flex items-center gap-2 rounded-md px-2 py-1 text-xs font-bold text-slate-700 hover:bg-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onChange(toggleFilterValue(selected, option))}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="truncate">{getLabel(option)}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   // Filter raw dataset based on fully custom metrics
   const rawFilteredData = useMemo(() => {
@@ -1858,7 +1890,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 <Sliders className="w-4 h-4" />
                 <div>
                   <h3>Quality Metric Multi-Filter System</h3>
-                  <p className="text-[10px] font-mono font-semibold text-slate-400 normal-case tracking-normal mt-0.5">Ctrl/Cmd-click to select multiple values.</p>
+                  <p className="text-[10px] font-mono font-semibold text-slate-400 normal-case tracking-normal mt-0.5">Use checkboxes to combine multiple values.</p>
                 </div>
               </div>
               <button
@@ -1881,148 +1913,22 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* V2 Cohort */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LABELER COHORT (V2 - AB)</label>
-                <select
-                  value={selectedCohort}
-                  onChange={(e) => setSelectedCohort(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="v2-cohort-filter"
-                >
-                  {uniqueCohorts.map(c => (
-                    <option key={c} value={c}>{c === "All" ? "All V2 Cohorts (Col AB)" : `Col AB: ${c}`}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* STQC Cohort */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LABELER COHORT (STQC - AA)</label>
-                <select
-                  value={selectedCohortStqc}
-                  onChange={(e) => setSelectedCohortStqc(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="stqc-cohort-filter"
-                >
-                  {uniqueCohortsStqc.map(c => (
-                    <option key={c} value={c}>{c === "All" ? "All STQC Cohorts (Col AA)" : `Col AA: ${c}`}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* V2 TL */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">V2 TEAM LEAD (Col AF)</label>
-                <select
-                  value={selectedTL}
-                  onChange={(e) => setSelectedTL(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="v2-tl-filter"
-                >
-                  {uniqueTLs.map(t => (
-                    <option key={t} value={t}>{t === "All" ? "All V2 Team Leads (Col AF)" : `Col AF: ${t}`}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* STQC TL */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">STQC TEAM LEAD (Col AG)</label>
-                <select
-                  value={selectedTLStqc}
-                  onChange={(e) => setSelectedTLStqc(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="stqc-tl-filter"
-                >
-                  {uniqueTLsStqc.map(t => (
-                    <option key={t} value={t}>{t === "All" ? "All STQC Team Leads (Col AG)" : `Col AG: ${t}`}</option>
-                  ))}
-                </select>
-              </div>
+              {renderCheckboxFilter("LABELER COHORT (V2 - AB)", uniqueCohorts, selectedCohort, setSelectedCohort, c => c === "All" ? "All V2 Cohorts (Col AB)" : `Col AB: ${c}`)}
+              {renderCheckboxFilter("LABELER COHORT (STQC - AA)", uniqueCohortsStqc, selectedCohortStqc, setSelectedCohortStqc, c => c === "All" ? "All STQC Cohorts (Col AA)" : `Col AA: ${c}`)}
+              {renderCheckboxFilter("V2 TEAM LEAD (Col AF)", uniqueTLs, selectedTL, setSelectedTL, t => t === "All" ? "All V2 Team Leads (Col AF)" : `Col AF: ${t}`)}
+              {renderCheckboxFilter("STQC TEAM LEAD (Col AG)", uniqueTLsStqc, selectedTLStqc, setSelectedTLStqc, t => t === "All" ? "All STQC Team Leads (Col AG)" : `Col AG: ${t}`)}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-              {/* V2 / STQC LOCATION */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">LOCATION FILTER (V2 AM / STQC AO)</label>
-                <select
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="location-filter"
-                >
-                  {uniqueLocations.map(l => (
-                    <option key={l} value={l}>{l === "All" ? "All V2/STQC Locations" : l}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* V2 / STQC Member */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">MEMBER FILTER (V2 P / STQC Q)</label>
-                <select
-                  value={selectedMember}
-                  onChange={(e) => setSelectedMember(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="member-filter"
-                >
-                  {uniqueMembers.map(member => (
-                    <option key={member} value={member}>{member === "All" ? "All V2/STQC Members" : member}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Week Beginning */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">WEEK BEGINNING</label>
-                <select
-                  value={selectedWeek}
-                  onChange={(e) => setSelectedWeek(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="week-filter"
-                >
-                  {uniqueWeeks.map(w => {
-                    if (w === "All") return <option key={w} value={w}>All Weeks</option>;
-                    
-                    // Format YYYY-MM-DD to a nice string
-                    let display = w;
-                    try {
-                      const date = new Date(w);
-                      if (!isNaN(date.getTime())) {
-                        display = date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-                      }
-                    } catch (e) {
-                      // fallback to raw
-                    }
-                    
-                    return <option key={w} value={w}>Week of {display}</option>;
-                  })}
-                </select>
-              </div>
-
-              {/* Month Selector */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-mono text-slate-500 font-bold uppercase">MONTH</label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(getMultiSelectValues(e.currentTarget))}
-                  multiple
-                  className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-lg p-2.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-bold min-h-[76px]"
-                  id="month-filter"
-                >
-                  {uniqueMonths.map(m => (
-                    <option key={m} value={m}>{m === "All" ? "All Months" : m}</option>
-                  ))}
-                </select>
-              </div>
+              {renderCheckboxFilter("LOCATION FILTER (V2 AM / STQC AO)", uniqueLocations, selectedLocation, setSelectedLocation, l => l === "All" ? "All V2/STQC Locations" : l)}
+              {renderCheckboxFilter("MEMBER FILTER (V2 P / STQC Q)", uniqueMembers, selectedMember, setSelectedMember, member => member === "All" ? "All V2/STQC Members" : member)}
+              {renderCheckboxFilter("WEEK BEGINNING", uniqueWeeks, selectedWeek, setSelectedWeek, w => {
+                if (w === "All") return "All Weeks";
+                const date = new Date(w);
+                const display = Number.isNaN(date.getTime()) ? w : date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `Week of ${display}`;
+              })}
+              {renderCheckboxFilter("MONTH", uniqueMonths, selectedMonth, setSelectedMonth, m => m === "All" ? "All Months" : m)}
 
               {/* Precision Distribution Filter (V2) */}
               <div className="flex flex-col gap-1">
