@@ -149,6 +149,12 @@ const matchesQualityBand = (score: number, band: string): boolean => {
   return true;
 };
 
+const formatWeekShort = (week: string): string => {
+  const date = new Date(week);
+  if (Number.isNaN(date.getTime())) return week;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
 const getRagStatus = (score: number) => {
   if (score >= 85) {
     return { label: "G", className: "bg-emerald-100 text-emerald-700 border-emerald-200" };
@@ -691,6 +697,54 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     return data;
   }, [filteredData, filterStqc]);
 
+  const recentWeeks = useMemo(() => {
+    return Array.from(new Set(filteredData.map(row => String(row.week_beginning || "").trim()).filter(Boolean)))
+      .sort((a, b) => {
+        const aTime = new Date(a).getTime();
+        const bTime = new Date(b).getTime();
+        if (!Number.isNaN(aTime) && !Number.isNaN(bTime)) return bTime - aTime;
+        return b.localeCompare(a);
+      })
+      .slice(0, 4);
+  }, [filteredData]);
+
+  const v2WeeklyScoresByMember = useMemo(() => {
+    const grouped: Record<string, Record<string, { total: number; fails: number }>> = {};
+
+    filteredData.forEach(row => {
+      const member = String(row.simteacher_v2_labeler || "").trim();
+      const week = String(row.week_beginning || "").trim();
+      if (!member || !week || !recentWeeks.includes(week)) return;
+      if (!grouped[member]) grouped[member] = {};
+      if (!grouped[member][week]) grouped[member][week] = { total: 0, fails: 0 };
+      grouped[member][week].total++;
+      if (isSelectQcFailValue(row.selectQcResult)) grouped[member][week].fails++;
+    });
+
+    return grouped;
+  }, [filteredData, recentWeeks]);
+
+  const qcWeeklyScoresByMember = useMemo(() => {
+    const grouped: Record<string, Record<string, { total: number; fails: number }>> = {};
+
+    filteredData.forEach(row => {
+      const member = String(row.qa_user_id || "").trim();
+      const week = String(row.week_beginning || "").trim();
+      if (!member || !week || !recentWeeks.includes(week)) return;
+      if (!grouped[member]) grouped[member] = {};
+      if (!grouped[member][week]) grouped[member][week] = { total: 0, fails: 0 };
+      grouped[member][week].total++;
+      if (isQcAuditFailValue(row.qc_error_category, row.qc_error_category_audit, row.failureReason)) grouped[member][week].fails++;
+    });
+
+    return grouped;
+  }, [filteredData, recentWeeks]);
+
+  const getWeeklyScoreText = (bucket?: { total: number; fails: number }) => {
+    if (!bucket || bucket.total === 0) return "NA";
+    return `${(((bucket.total - bucket.fails) / bucket.total) * 100).toFixed(1)}%`;
+  };
+
   const labelersSummary = useMemo(() => {
     let base = getLabelerPerformanceSummary(filteredData);
 
@@ -722,6 +776,42 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     }
     return base;
   }, [filteredData, qcSortConfig]);
+
+  const v2LedgerExportRows = useMemo(() => {
+    return labelersSummary.map(row => {
+      const weeklyScores = recentWeeks.reduce((acc, week, index) => {
+        acc[`week${index + 1}Score`] = getWeeklyScoreText(v2WeeklyScoresByMember[row.labelerId]?.[week]);
+        return acc;
+      }, {} as Record<string, string>);
+      return { ...row, ...weeklyScores };
+    });
+  }, [labelersSummary, recentWeeks, v2WeeklyScoresByMember]);
+
+  const qcLedgerExportRows = useMemo(() => {
+    return qcAuditorsSummary.map(row => {
+      const weeklyScores = recentWeeks.reduce((acc, week, index) => {
+        acc[`week${index + 1}Score`] = getWeeklyScoreText(qcWeeklyScoresByMember[row.auditorId]?.[week]);
+        return acc;
+      }, {} as Record<string, string>);
+      return { ...row, ...weeklyScores };
+    });
+  }, [qcAuditorsSummary, recentWeeks, qcWeeklyScoresByMember]);
+
+  const v2LedgerColumnHeaders = useMemo(() => {
+    const weekHeaders = recentWeeks.reduce((acc, week, index) => {
+      acc[`week${index + 1}Score`] = `${formatWeekShort(week)} SCORE`;
+      return acc;
+    }, {} as Record<string, string>);
+    return { ...v2ColumnHeaders, ...weekHeaders };
+  }, [recentWeeks]);
+
+  const qcLedgerColumnHeaders = useMemo(() => {
+    const weekHeaders = recentWeeks.reduce((acc, week, index) => {
+      acc[`week${index + 1}Score`] = `${formatWeekShort(week)} SCORE`;
+      return acc;
+    }, {} as Record<string, string>);
+    return { ...qcColumnHeaders, ...weekHeaders };
+  }, [recentWeeks]);
 
   const advancedAnalytics = useMemo(() => {
     const rawWeeks = Array.from(new Set(filteredData.map(d => d.week_beginning).filter(Boolean)));
@@ -3045,14 +3135,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => exportToCSV(labelersSummary, v2ColumnHeaders, "V2_Labeler_Performance.csv")}
+                  onClick={() => exportToCSV(v2LedgerExportRows, v2LedgerColumnHeaders, "V2_Labeler_Performance.csv")}
                   className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs hover:border-slate-300"
                 >
                   <FileDown className="w-3.5 h-3.5" />
                   CSV
                 </button>
                 <button
-                  onClick={() => exportToPDF(labelersSummary, v2ColumnHeaders, "V2 Labeler Performance Standard Deviation Ledger", "V2_Labeler_Performance.pdf")}
+                  onClick={() => exportToPDF(v2LedgerExportRows, v2LedgerColumnHeaders, "V2 Labeler Performance Standard Deviation Ledger", "V2_Labeler_Performance.pdf")}
                   className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs hover:border-slate-300"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -3076,6 +3166,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     { key: "efficiencyIndex", label: "PACING INDEX", sortable: true, center: true },
                     { key: "durationStdDev", label: "DURATION STDEV", sortable: true, center: true },
                     { key: "nuroDefects", label: "CLIENT DEFECTS", sortable: true, center: true },
+                    ...recentWeeks.map((week, index) => ({ key: `week${index + 1}Score`, label: `${formatWeekShort(week)} SCORE`, sortable: false, center: true })),
                   ].map((col) => (
                     <th
                       key={col.key}
@@ -3136,6 +3227,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                           {row.nuroDefects} defect{row.nuroDefects === 1 ? "" : "s"}
                         </span>
                       </td>
+                      {recentWeeks.map(week => (
+                        <td key={`${row.labelerId}-${week}`} className="px-6 py-4 text-center font-mono text-xs font-black text-indigo-700">
+                          {getWeeklyScoreText(v2WeeklyScoresByMember[row.labelerId]?.[week])}
+                        </td>
+                      ))}
                       <td className="px-6 py-4 text-right">
                         <span
                           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold border ${
@@ -3197,14 +3293,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => exportToCSV(qcAuditorsSummary, qcColumnHeaders, "STQC_Auditor_Performance.csv")}
+                  onClick={() => exportToCSV(qcLedgerExportRows, qcLedgerColumnHeaders, "STQC_Auditor_Performance.csv")}
                   className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs hover:border-slate-300"
                 >
                   <FileDown className="w-3.5 h-3.5" />
                   CSV
                 </button>
                 <button
-                  onClick={() => exportToPDF(qcAuditorsSummary, qcColumnHeaders, "STQC QC Auditor Performance Standard Deviation Ledger", "STQC_Auditor_Performance.pdf")}
+                  onClick={() => exportToPDF(qcLedgerExportRows, qcLedgerColumnHeaders, "STQC QC Auditor Performance Standard Deviation Ledger", "STQC_Auditor_Performance.pdf")}
                   className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition shadow-3xs hover:border-slate-300"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -3228,6 +3324,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                     { key: "efficiencyIndex", label: "QC PACING INDEX", sortable: true, center: true },
                     { key: "durationStdDev", label: "DURATION STDEV", sortable: true, center: true },
                     { key: "nuroDefects", label: "CLIENT DEFECTS", sortable: true, center: true },
+                    ...recentWeeks.map((week, index) => ({ key: `week${index + 1}Score`, label: `${formatWeekShort(week)} SCORE`, sortable: false, center: true })),
                   ].map((col) => (
                     <th
                       key={col.key}
@@ -3288,6 +3385,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                           {row.nuroDefects} defect{row.nuroDefects === 1 ? "" : "s"}
                         </span>
                       </td>
+                      {recentWeeks.map(week => (
+                        <td key={`${row.auditorId}-${week}`} className="px-6 py-4 text-center font-mono text-xs font-black text-emerald-700">
+                          {getWeeklyScoreText(qcWeeklyScoresByMember[row.auditorId]?.[week])}
+                        </td>
+                      ))}
                       <td className="px-6 py-4 text-right">
                         <span
                           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold border ${
