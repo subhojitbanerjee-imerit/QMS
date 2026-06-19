@@ -131,6 +131,24 @@ const hasAuditValue = (value?: string): boolean => {
   return val !== "" && val !== "none" && val !== "null" && val !== "undefined" && val !== "na" && val !== "n/a";
 };
 
+const QUALITY_BANDS = {
+  all: "All",
+  b85: "\u226585%",
+  b80_85: "80%\u201385%",
+  b70_80: "70%\u201380%",
+  b50_70: "50%\u201370%",
+  sub50: "<50%"
+} as const;
+
+const matchesQualityBand = (score: number, band: string): boolean => {
+  if (band === QUALITY_BANDS.b85) return score >= 85;
+  if (band === QUALITY_BANDS.b80_85) return score >= 80 && score < 85;
+  if (band === QUALITY_BANDS.b70_80) return score >= 70 && score < 80;
+  if (band === QUALITY_BANDS.b50_70) return score >= 50 && score < 70;
+  if (band === QUALITY_BANDS.sub50) return score < 50;
+  return true;
+};
+
 const getRagStatus = (score: number) => {
   if (score >= 85) {
     return { label: "G", className: "bg-emerald-100 text-emerald-700 border-emerald-200" };
@@ -450,62 +468,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     selectedMonth
   ]);
 
-  // Secondary filtering for distribution
-  const filteredData = useMemo(() => {
-    let result = rawFilteredData;
-
-    if (v2DistFilter !== "All") {
-      const labelerStatsMap: Record<string, { total: number; correct: number }> = {};
-      rawFilteredData.forEach(row => {
-        const id = row.simteacher_v2_labeler;
-        if (!id) return;
-        if (!labelerStatsMap[id]) labelerStatsMap[id] = { total: 0, correct: 0 };
-        labelerStatsMap[id].total++;
-        if (row.v2_accuracy === 100) labelerStatsMap[id].correct++;
-      });
-
-      result = result.filter(row => {
-        const id = row.simteacher_v2_labeler;
-        if (!id) return false;
-        const stats = labelerStatsMap[id];
-        const acc = (stats.correct / stats.total) * 100;
-
-        if (v2DistFilter === "≥85%") return acc >= 85;
-        if (v2DistFilter === "80%–85%") return acc >= 80 && acc < 85;
-        if (v2DistFilter === "70%–80%") return acc >= 70 && acc < 80;
-        if (v2DistFilter === "50%–70%") return acc >= 50 && acc < 70;
-        if (v2DistFilter === "<50%") return acc < 50;
-        return true;
-      });
-    }
-
-    if (qcDistFilter !== "All") {
-      const auditorStatsMap: Record<string, { total: number; correct: number }> = {};
-      rawFilteredData.forEach(row => {
-        const id = row.simteacher_stqc_auditor;
-        if (!id) return;
-        if (!auditorStatsMap[id]) auditorStatsMap[id] = { total: 0, correct: 0 };
-        auditorStatsMap[id].total++;
-        if (row.stqc_accuracy === 100) auditorStatsMap[id].correct++;
-      });
-
-      result = result.filter(row => {
-        const id = row.simteacher_stqc_auditor;
-        if (!id) return false;
-        const stats = auditorStatsMap[id];
-        const acc = (stats.correct / stats.total) * 100;
-
-        if (qcDistFilter === "≥85%") return acc >= 85;
-        if (qcDistFilter === "80%–85%") return acc >= 80 && acc < 85;
-        if (qcDistFilter === "70%–80%") return acc >= 70 && acc < 80;
-        if (qcDistFilter === "50%–70%") return acc >= 50 && acc < 70;
-        if (qcDistFilter === "<50%") return acc < 50;
-        return true;
-      });
-    }
-
-    return result;
-  }, [rawFilteredData, v2DistFilter, qcDistFilter]);
+  // Shared dataset after master filters. Ledger quality bands are applied only inside ledger summaries.
+  const filteredData = useMemo(() => rawFilteredData, [rawFilteredData]);
 
   // Operational metrics
   const metrics = useMemo(() => {
@@ -708,15 +672,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
     // Apply distribution filter
     if (v2DistFilter !== "All") {
-      base = base.filter(l => {
-        const q = l.v2Accuracy;
-        if (v2DistFilter === "≥85%") return q >= 85;
-        if (v2DistFilter === "80%–85%") return q >= 80 && q < 85;
-        if (v2DistFilter === "70%–80%") return q >= 70 && q < 80;
-        if (v2DistFilter === "50%–70%") return q >= 50 && q < 70;
-        if (v2DistFilter === "<50%") return q < 50;
-        return true;
-      });
+      base = base.filter(l => matchesQualityBand(l.v2Accuracy, v2DistFilter));
     }
 
     // Apply sorting
@@ -737,15 +693,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
     // Apply distribution filter
     if (qcDistFilter !== "All") {
-      base = base.filter(l => {
-        const q = l.qcAccuracy;
-        if (qcDistFilter === "≥85%") return q >= 85;
-        if (qcDistFilter === "80%–85%") return q >= 80 && q < 85;
-        if (qcDistFilter === "70%–80%") return q >= 70 && q < 80;
-        if (qcDistFilter === "50%–70%") return q >= 50 && q < 70;
-        if (qcDistFilter === "<50%") return q < 50;
-        return true;
-      });
+      base = base.filter(l => matchesQualityBand(l.qcAccuracy, qcDistFilter));
     }
 
     // Apply sorting
