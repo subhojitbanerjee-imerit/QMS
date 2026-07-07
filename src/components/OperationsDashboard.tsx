@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   COMPLETE_TASK_TRACKER_DATA,
   getOperationalMetrics,
@@ -57,7 +57,7 @@ import {
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { initAuth, googleSignIn, logout } from "../lib/firebaseAuth";
-import { fetchTaskTrackerSheet, fetchRoles } from "../lib/sheetsService";
+import { appendDashboardAccessLog, fetchTaskTrackerSheet, fetchRoles } from "../lib/sheetsService";
 import { User } from "firebase/auth";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
@@ -216,6 +216,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [isSynced, setIsSynced] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const loggedAccessKeys = useRef<Set<string>>(new Set());
 
   // Sync locations to parent header when data loads
   useEffect(() => {
@@ -230,6 +231,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       }
     }
   }, [taskData, onLocationsUpdate]);
+
+  const logDashboardAccess = async (accessToken: string, email?: string | null) => {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+
+    const logKey = `${normalizedEmail}:${new Date().toISOString().slice(0, 16)}`;
+    if (loggedAccessKeys.current.has(logKey)) return;
+    loggedAccessKeys.current.add(logKey);
+
+    try {
+      await appendDashboardAccessLog(accessToken, normalizedEmail);
+    } catch (error) {
+      console.warn("Dashboard access log append failed:", error);
+    }
+  };
 
   // Listen to Firebase Auth state for caching and initial session load
   useEffect(() => {
@@ -255,6 +271,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             const role = rolesMap[firebaseUser.email.toLowerCase()] || "Lead"; // Default to Lead if not found
             setUserRole(role);
           }
+          await logDashboardAccess(cachedToken, firebaseUser.email);
         } catch (err: any) {
           console.error("Auto sheets load trigger failed:", err);
           setSheetsError(err.message || "Failed to load Google Sheets row cells automatically.");
@@ -299,6 +316,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           const role = rolesMap[result.user.email.toLowerCase()] || "Lead";
           setUserRole(role);
         }
+        await logDashboardAccess(result.accessToken, result.user.email);
       }
     } catch (err: any) {
       console.error("Failed to connect sheets via interactive click:", err);

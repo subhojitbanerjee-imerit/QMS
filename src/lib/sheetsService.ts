@@ -2,6 +2,7 @@ import { TaskTrackerRow } from "../data/taskTrackerData";
 
 const SPREADSHEET_ID = "1KOOx8Qis_zu8zBO_yfLCCMdPTkPve6WkNL3pJkMXILk";
 const SHEET_NAME = "Task Tracker";
+const LOG_SHEET_NAME = "Log";
 
 // Define normalized map configurations for clean dynamic binding
 const HEADER_KEY_ALIASE_MAP: Record<string, string[]> = {
@@ -167,6 +168,41 @@ export const fetchRoles = async (accessToken: string): Promise<Record<string, st
   } catch (error) {
     console.error("Error fetching roles:", error);
     return {};
+  }
+};
+
+export const appendDashboardAccessLog = async (accessToken: string, email?: string | null): Promise<void> => {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return;
+
+  const range = `${LOG_SHEET_NAME}!A:C`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  const timestamp = new Date().toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      values: [[normalizedEmail, timestamp, "Dashboard access"]]
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || `Log sheet append failed with HTTP ${response.status}`);
   }
 };
 

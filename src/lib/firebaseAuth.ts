@@ -12,9 +12,9 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-// Google Auth Provider setup with Sheets Readonly scope
+// Google Auth Provider setup with Sheets scope for reading dashboard data and writing access logs
 const provider = new GoogleAuthProvider();
-provider.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
+provider.addScope("https://www.googleapis.com/auth/spreadsheets");
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = typeof window !== "undefined" ? localStorage.getItem("sheet_access_token") : null;
