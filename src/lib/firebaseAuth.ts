@@ -15,6 +15,9 @@ const firebaseConfig = {
 // Google Auth Provider setup with Sheets scope for reading dashboard data and writing access logs
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/spreadsheets");
+provider.setCustomParameters({
+  prompt: "consent"
+});
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = typeof window !== "undefined" ? localStorage.getItem("sheet_access_token") : null;

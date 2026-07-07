@@ -213,6 +213,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [token, setToken] = useState<string | null>(null);
   const [loadingSheets, setLoadingSheets] = useState<boolean>(false);
   const [sheetsError, setSheetsError] = useState<string | null>(null);
+  const [logWarning, setLogWarning] = useState<string | null>(null);
   const [isSynced, setIsSynced] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -238,12 +239,15 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
     const logKey = `${normalizedEmail}:${new Date().toISOString().slice(0, 16)}`;
     if (loggedAccessKeys.current.has(logKey)) return;
-    loggedAccessKeys.current.add(logKey);
 
     try {
       await appendDashboardAccessLog(accessToken, normalizedEmail);
+      loggedAccessKeys.current.add(logKey);
+      setLogWarning(null);
     } catch (error) {
       console.warn("Dashboard access log append failed:", error);
+      const message = error instanceof Error ? error.message : "Unknown Log tab write error.";
+      setLogWarning(`Dashboard loaded, but Log tab was not updated: ${message}`);
     }
   };
 
@@ -333,6 +337,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     setTaskData([]);
     setIsSynced(false);
     setSheetsError(null);
+    setLogWarning(null);
   };
 
   // Analytical Filters
@@ -1736,6 +1741,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         {sheetsError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
             ⚠️ <strong>OAuth Sync Alert:</strong> {sheetsError}
+          </div>
+        )}
+        
+        {logWarning && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 font-medium">
+            <strong>Log Alert:</strong> {logWarning}
           </div>
         )}
         
@@ -3804,3 +3815,4 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 </div>
   );
 }
+
