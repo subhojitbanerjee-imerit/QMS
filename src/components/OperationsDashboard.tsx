@@ -56,11 +56,13 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { initAuth, googleSignIn, logout } from "../lib/firebaseAuth";
+import { fetchTaskTrackerSheet, fetchRoles } from "../lib/sheetsService";
+import { User } from "firebase/auth";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
 const ALL_ADVANCED_WEEKS_KEY = "__all_weeks__";
 const ALL_ADVANCED_WEEKS_LABEL = "All Weeks";
-const SESSION_STORAGE_KEY = "qms_roles_session";
 
 function getQcTypeBucket(qcErrorType?: string): "Controllable" | "Uncontrollable" | null {
   const value = String(qcErrorType || "").trim().toLowerCase();
@@ -206,15 +208,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   // Local active dataset state
   const [taskData, setTaskData] = useState<TaskTrackerRow[]>([]);
 
-  // Roles sheet login state
-  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [loginEmail, setLoginEmail] = useState<string>("");
-  const [loginPassword, setLoginPassword] = useState<string>("");
+  // Google Sheets integration state
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loadingSheets, setLoadingSheets] = useState<boolean>(false);
   const [sheetsError, setSheetsError] = useState<string | null>(null);
   const [isSynced, setIsSynced] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Sync locations to parent header when data loads
   useEffect(() => {
@@ -230,88 +231,87 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     }
   }, [taskData, onLocationsUpdate]);
 
-  const loadTaskTrackerForSession = async (authToken: string) => {
-    setLoadingSheets(true);
-    setSheetsError(null);
-    try {
-      const response = await fetch("/api/sheets/task-tracker", {
-        headers: {
-          Authorization: `Bearer ${authToken}`
-        }
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || `Task Tracker request failed with HTTP ${response.status}`);
-      }
-
-      const sheetRows = Array.isArray(payload.data) ? payload.data : [];
-      if (sheetRows.length === 0) {
-        throw new Error("The linked Task Tracker sheet contains no metrics data rows.");
-      }
-
-      (sheetRows as any).headers = payload.headers || [];
-      setTaskData(sheetRows);
-      setIsSynced(true);
-      setLastSyncedAt(new Date().toLocaleTimeString());
-    } catch (err: any) {
-      console.error("Failed to load Task Tracker after role login:", err);
-      setSheetsError(err.message || "Failed to load Task Tracker data.");
-      setTaskData([]);
-      setIsSynced(false);
-    } finally {
-      setLoadingSheets(false);
-    }
-  };
-
+  // Listen to Firebase Auth state for caching and initial session load
   useEffect(() => {
-    const savedSession = typeof window !== "undefined" ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
-    if (!savedSession) return;
+    const unsubscribe = initAuth(
+      async (firebaseUser, cachedToken) => {
+        setUser(firebaseUser);
+        setToken(cachedToken);
+        setSheetsError(null);
+        try {
+          setLoadingSheets(true);
+          const [sheetRows, rolesMap] = await Promise.all([
+            fetchTaskTrackerSheet(cachedToken),
+            fetchRoles(cachedToken)
+          ]);
 
-    try {
-      const parsed = JSON.parse(savedSession) as { email?: string; token?: string };
-      if (parsed.email && parsed.token) {
-        setSessionEmail(parsed.email);
-        setSessionToken(parsed.token);
-        loadTaskTrackerForSession(parsed.token);
+          if (sheetRows && sheetRows.length > 0) {
+            setTaskData(sheetRows);
+            setIsSynced(true);
+            setLastSyncedAt(new Date().toLocaleTimeString());
+          }
+
+          if (firebaseUser.email) {
+            const role = rolesMap[firebaseUser.email.toLowerCase()] || "Lead"; // Default to Lead if not found
+            setUserRole(role);
+          }
+        } catch (err: any) {
+          console.error("Auto sheets load trigger failed:", err);
+          setSheetsError(err.message || "Failed to load Google Sheets row cells automatically.");
+        } finally {
+          setLoadingSheets(false);
+        }
+      },
+      () => {
+        setUser(null);
+        setToken(null);
+        setTaskData([]);
+        setIsSynced(false);
+        setUserRole(null);
       }
-    } catch {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    }
+    );
+    return () => unsubscribe();
   }, []);
 
-  const handleRoleLogin = async (event?: React.FormEvent) => {
-    if (event) event.preventDefault();
+  const handleConnectSheets = async () => {
     setLoadingSheets(true);
     setSheetsError(null);
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || "Invalid email or password.");
-      }
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        setToken(result.accessToken);
+        
+        const [sheetRows, rolesMap] = await Promise.all([
+          fetchTaskTrackerSheet(result.accessToken),
+          fetchRoles(result.accessToken)
+        ]);
 
-      setSessionEmail(payload.email);
-      setSessionToken(payload.token);
-      setLoginPassword("");
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ email: payload.email, token: payload.token }));
-      await loadTaskTrackerForSession(payload.token);
+        if (sheetRows && sheetRows.length > 0) {
+          setTaskData(sheetRows);
+          setIsSynced(true);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        } else {
+          setSheetsError("The linked Task Tracker sheet contains no metrics data rows.");
+        }
+
+        if (result.user.email) {
+          const role = rolesMap[result.user.email.toLowerCase()] || "Lead";
+          setUserRole(role);
+        }
+      }
     } catch (err: any) {
-      setSheetsError(err.message || "Login failed.");
-      setTaskData([]);
-      setIsSynced(false);
+      console.error("Failed to connect sheets via interactive click:", err);
+      setSheetsError(err.message || "Authentication or fetch failed.");
     } finally {
       setLoadingSheets(false);
     }
   };
 
-  const handleDisconnectSheets = () => {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    setSessionEmail(null);
-    setSessionToken(null);
+  const handleDisconnectSheets = async () => {
+    await logout();
+    setUser(null);
+    setToken(null);
     setTaskData([]);
     setIsSynced(false);
     setSheetsError(null);
@@ -1659,19 +1659,19 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </div>
             <div>
               <h3 className="text-sm font-display font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
-                Authorized Sheet Access
+                Google Sheets Live Sync Router
                 {isSynced ? (
                   <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase animate-pulse">
-                    ACCESS GRANTED
+                    LIVE CONNECTION ACTIVE
                   </span>
                 ) : (
                   <span className="bg-slate-100 border border-slate-200 text-slate-500 text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase">
-                    SIGN IN REQUIRED
+                    OFFLINE SANDBOX MODE
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Sign in with an email and password listed in the <code className="bg-slate-50 px-1 py-0.5 text-[10px] font-mono border border-slate-200 rounded text-indigo-600">Roles</code> tab to load the Task Tracker data.
+                Routes live task records from designated Google Sheet: <code className="bg-slate-50 px-1 py-0.5 text-[10px] font-mono border border-slate-200 rounded text-indigo-600">ID: 1KOOx8Qis...</code> ("Task Tracker" tab).
               </p>
             </div>
           </div>
@@ -1680,50 +1680,36 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             {isSynced ? (
               <div className="flex items-center gap-3">
                 <div className="text-right flex flex-col hidden sm:flex">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">SIGNED IN USER</span>
-                  <span className="text-xs font-semibold text-slate-700">{sessionEmail}</span>
+                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">CONNECTED USER</span>
+                  <span className="text-xs font-semibold text-slate-700">{user?.email}</span>
                 </div>
                 <button
                   onClick={handleDisconnectSheets}
                   className="bg-white border border-red-250 hover:bg-red-50 text-red-650 font-bold text-xs px-4 py-2 rounded-lg transition cursor-pointer shadow-3xs"
                 >
-                  Sign Out
+                  Disconnect Sheet
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col items-stretch gap-2 w-full lg:w-auto">
-                <form onSubmit={handleRoleLogin} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <input
-                    type="email"
-                    value={loginEmail}
-                    onChange={(event) => setLoginEmail(event.target.value)}
-                    placeholder="email"
-                    className="min-w-0 sm:w-56 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    required
-                  />
-                  <input
-                    type="password"
-                    value={loginPassword}
-                    onChange={(event) => setLoginPassword(event.target.value)}
-                    placeholder="password"
-                    className="min-w-0 sm:w-36 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    required
-                  />
-                  <button
-                    type="submit"
-                    disabled={loadingSheets}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 transition cursor-pointer shadow-3xs disabled:bg-indigo-300"
-                  >
-                    {loadingSheets ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
-                    <span>{loadingSheets ? "Signing in..." : "Sign In"}</span>
-                  </button>
-                </form>
-                {sheetsError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 font-semibold">
-                    {sheetsError}
-                  </div>
+              <button
+                onClick={handleConnectSheets}
+                disabled={loadingSheets}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg flex items-center gap-2 transition cursor-pointer shadow-3xs disabled:bg-indigo-300"
+              >
+                {loadingSheets ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Connecting via OAuth...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z" />
+                    </svg>
+                    <span>Authorize & Link Google Sheet</span>
+                  </>
                 )}
-              </div>
+              </button>
             )}
           </div>
         </div>
@@ -1731,7 +1717,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         {/* Sync Status Info Row */}
         {sheetsError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
-            <strong>Sheet Access Alert:</strong> {sheetsError}
+            ⚠️ <strong>OAuth Sync Alert:</strong> {sheetsError}
           </div>
         )}
         
@@ -1740,7 +1726,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-xs font-mono text-slate-600 bg-slate-50 border border-slate-150 p-3 rounded-lg gap-3">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                <span><strong>Authorized Sheet Source:</strong> Ingested <strong>{taskData.length} records</strong> dynamically. Filters and AI engines aligned with live sheet cells. {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Synced at {lastSyncedAt}</span>}</span>
+                <span><strong>Google Sheet Sync Source:</strong> Ingested <strong>{taskData.length} records</strong> dynamically. Filters and AI engines aligned with live sheet cells. {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Synced at {lastSyncedAt}</span>}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1765,7 +1751,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                   <span>{showSchemaDiagnostic ? "Hide Schema Mappings" : "Inspect Schema Mappings"}</span>
                 </button>
                 <button
-                  onClick={() => sessionToken && loadTaskTrackerForSession(sessionToken)}
+                  onClick={handleConnectSheets}
                   disabled={loadingSheets}
                   className="text-[10px] bg-white hover:bg-slate-100 border border-slate-200 text-indigo-650 font-bold px-2.5 py-1 rounded transition flex items-center gap-1.5 cursor-pointer"
                 >
@@ -1867,49 +1853,38 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </svg>
           </div>
           <div className="space-y-2">
-            <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase">Sign In Required</h3>
+            <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase">Live Operations Stream Offline</h3>
             <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-              Use an email and password listed in the Roles tab to load the live Task Tracker data.
+              This dashboard is strictly structured to parse and map dynamic operational telemetry directly from Google Sheets. To experience full telemetry, authorize the live sync router.
             </p>
           </div>
-          <form onSubmit={handleRoleLogin} className="flex flex-col sm:flex-row justify-center items-stretch sm:items-center gap-3 pt-2">
-            <input
-              type="email"
-              value={loginEmail}
-              onChange={(event) => setLoginEmail(event.target.value)}
-              placeholder="email"
-              className="w-full sm:w-64 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-4 py-3 rounded-xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-              required
-            />
-            <input
-              type="password"
-              value={loginPassword}
-              onChange={(event) => setLoginPassword(event.target.value)}
-              placeholder="password"
-              className="w-full sm:w-44 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-4 py-3 rounded-xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-              required
-            />
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
             <button
-              type="submit"
+              onClick={handleConnectSheets}
               disabled={loadingSheets}
               className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-sm disabled:opacity-55"
             >
-              {loadingSheets ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
-              <span>{loadingSheets ? "Signing in..." : "Sign In"}</span>
+              {loadingSheets ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Authorizing via Google...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z" />
+                  </svg>
+                  <span>Authorize & Link Google Sheet</span>
+                </>
+              )}
             </button>
             <button
-              type="button"
               onClick={() => setTaskData(COMPLETE_TASK_TRACKER_DATA)}
               className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-6 py-3 rounded-xl transition cursor-pointer"
             >
               Initialize Local Sandbox Simulation
             </button>
-          </form>
-          {sheetsError && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700 font-semibold text-left">
-              {sheetsError}
-            </div>
-          )}
+          </div>
           <div className="border-t border-slate-100 pt-5 text-left space-y-2">
             <h4 className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">Linked Resource Configuration:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-150">

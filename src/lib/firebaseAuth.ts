@@ -53,9 +53,9 @@ export const initAuth = (
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        // User is logged into Firebase but we don't have the Google OAuth token for Sheets anymore
-        // Force logout to prompt re-login for token acquisition
-        await logout();
+        // Firebase keeps the user signed in after refresh. If the Sheets OAuth
+        // access token is gone, keep that user session and let the dashboard ask
+        // for one click to refresh the Sheets token instead of signing out.
         if (onAuthFailure) onAuthFailure();
       }
     } else {
