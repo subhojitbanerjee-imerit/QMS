@@ -63,6 +63,8 @@ import { User } from "firebase/auth";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
 const ALL_ADVANCED_WEEKS_KEY = "__all_weeks__";
 const ALL_ADVANCED_WEEKS_LABEL = "All Weeks";
+const SHEET_CACHE_KEY = "qms_task_tracker_cache_v1";
+const SHEET_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 function getQcTypeBucket(qcErrorType?: string): "Controllable" | "Uncontrollable" | null {
   const value = String(qcErrorType || "").trim().toLowerCase();
@@ -219,6 +221,41 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   const [userRole, setUserRole] = useState<string | null>(null);
   const loggedAccessKeys = useRef<Set<string>>(new Set());
 
+  const applyTaskRows = (sheetRows: TaskTrackerRow[], headers?: string[], syncedAt?: string) => {
+    if (!sheetRows || sheetRows.length === 0) return false;
+    (sheetRows as any).headers = headers || (sheetRows as any).headers || [];
+    setTaskData(sheetRows);
+    setIsSynced(true);
+    setLastSyncedAt(syncedAt || new Date().toLocaleTimeString());
+    return true;
+  };
+
+  const cacheTaskRows = (sheetRows: TaskTrackerRow[]) => {
+    if (typeof window === "undefined" || !sheetRows || sheetRows.length === 0) return;
+    try {
+      localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify({
+        rows: sheetRows,
+        headers: (sheetRows as any).headers || [],
+        cachedAt: Date.now()
+      }));
+    } catch (error) {
+      console.warn("Failed to cache Task Tracker rows:", error);
+    }
+  };
+
+  const loadCachedTaskRows = () => {
+    if (typeof window === "undefined") return;
+    try {
+      const cached = localStorage.getItem(SHEET_CACHE_KEY);
+      if (!cached) return;
+      const parsed = JSON.parse(cached) as { rows?: TaskTrackerRow[]; headers?: string[]; cachedAt?: number };
+      if (!parsed.rows?.length || !parsed.cachedAt || Date.now() - parsed.cachedAt > SHEET_CACHE_MAX_AGE_MS) return;
+      applyTaskRows(parsed.rows, parsed.headers, "cached");
+    } catch (error) {
+      console.warn("Failed to load cached Task Tracker rows:", error);
+    }
+  };
+
   // Sync locations to parent header when data loads
   useEffect(() => {
     if (taskData.length > 0 && onLocationsUpdate) {
@@ -253,6 +290,8 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
   // Listen to Firebase Auth state for caching and initial session load
   useEffect(() => {
+    loadCachedTaskRows();
+
     const unsubscribe = initAuth(
       async (firebaseUser, cachedToken) => {
         setUser(firebaseUser);
@@ -260,22 +299,22 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         setSheetsError(null);
         try {
           setLoadingSheets(true);
-          const [sheetRows, rolesMap] = await Promise.all([
-            fetchTaskTrackerSheet(cachedToken),
-            fetchRoles(cachedToken)
-          ]);
+          const sheetRows = await fetchTaskTrackerSheet(cachedToken);
 
-          if (sheetRows && sheetRows.length > 0) {
-            setTaskData(sheetRows);
-            setIsSynced(true);
-            setLastSyncedAt(new Date().toLocaleTimeString());
+          if (applyTaskRows(sheetRows)) {
+            cacheTaskRows(sheetRows);
           }
 
-          if (firebaseUser.email) {
-            const role = rolesMap[firebaseUser.email.toLowerCase()] || "Lead"; // Default to Lead if not found
-            setUserRole(role);
-          }
-          await logDashboardAccess(cachedToken, firebaseUser.email);
+          fetchRoles(cachedToken)
+            .then((rolesMap) => {
+              if (firebaseUser.email) {
+                const role = rolesMap[firebaseUser.email.toLowerCase()] || "Lead";
+                setUserRole(role);
+              }
+            })
+            .catch((error) => console.warn("Background role load failed:", error));
+
+          logDashboardAccess(cachedToken, firebaseUser.email);
         } catch (err: any) {
           console.error("Auto sheets load trigger failed:", err);
           setSheetsError(err.message || "Failed to load Google Sheets row cells automatically.");
@@ -303,24 +342,24 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         setUser(result.user);
         setToken(result.accessToken);
         
-        const [sheetRows, rolesMap] = await Promise.all([
-          fetchTaskTrackerSheet(result.accessToken),
-          fetchRoles(result.accessToken)
-        ]);
+        const sheetRows = await fetchTaskTrackerSheet(result.accessToken);
 
-        if (sheetRows && sheetRows.length > 0) {
-          setTaskData(sheetRows);
-          setIsSynced(true);
-          setLastSyncedAt(new Date().toLocaleTimeString());
+        if (applyTaskRows(sheetRows)) {
+          cacheTaskRows(sheetRows);
         } else {
           setSheetsError("The linked Task Tracker sheet contains no metrics data rows.");
         }
 
-        if (result.user.email) {
-          const role = rolesMap[result.user.email.toLowerCase()] || "Lead";
-          setUserRole(role);
-        }
-        await logDashboardAccess(result.accessToken, result.user.email);
+        fetchRoles(result.accessToken)
+          .then((rolesMap) => {
+            if (result.user.email) {
+              const role = rolesMap[result.user.email.toLowerCase()] || "Lead";
+              setUserRole(role);
+            }
+          })
+          .catch((error) => console.warn("Background role load failed:", error));
+
+        logDashboardAccess(result.accessToken, result.user.email);
       }
     } catch (err: any) {
       console.error("Failed to connect sheets via interactive click:", err);
@@ -338,6 +377,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     setIsSynced(false);
     setSheetsError(null);
     setLogWarning(null);
+    if (typeof window !== "undefined") localStorage.removeItem(SHEET_CACHE_KEY);
   };
 
   // Analytical Filters
