@@ -1,11 +1,8 @@
 import express from "express";
 import path from "path";
-import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { fetchTaskTrackerSheet } from "./src/lib/sheetsService";
-import { TaskTrackerRow } from "./src/data/taskTrackerData";
 
 dotenv.config();
 
@@ -15,71 +12,6 @@ const PORT = 3000;
 app.use(express.json());
 
 export default app;
-
-let sheetsAccessTokenCache: { token: string; expiresAt: number } | null = null;
-let taskTrackerCache: { rows: TaskTrackerRow[]; syncedAt: string } | null = null;
-
-function base64Url(input: string | Buffer): string {
-  return Buffer.from(input)
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-}
-
-async function getAdminSheetsAccessToken(): Promise<string> {
-  if (process.env.GOOGLE_SHEETS_ACCESS_TOKEN?.trim()) {
-    return process.env.GOOGLE_SHEETS_ACCESS_TOKEN.trim();
-  }
-
-  if (sheetsAccessTokenCache && Date.now() < sheetsAccessTokenCache.expiresAt - 60_000) {
-    return sheetsAccessTokenCache.token;
-  }
-
-  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
-  const rawPrivateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.trim();
-
-  if (!clientEmail || !rawPrivateKey) {
-    throw new Error("Backend Sheets sync is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.");
-  }
-
-  const privateKey = rawPrivateKey.replace(/\\n/g, "\n");
-  const now = Math.floor(Date.now() / 1000);
-  const header = { alg: "RS256", typ: "JWT" };
-  const payload = {
-    iss: clientEmail,
-    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
-    aud: "https://oauth2.googleapis.com/token",
-    exp: now + 3600,
-    iat: now
-  };
-
-  const unsignedJwt = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(payload))}`;
-  const signature = crypto.createSign("RSA-SHA256").update(unsignedJwt).sign(privateKey);
-  const assertion = `${unsignedJwt}.${base64Url(signature)}`;
-
-  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion
-    })
-  });
-
-  if (!tokenResponse.ok) {
-    const detail = await tokenResponse.text().catch(() => "");
-    throw new Error(`Google service-account token request failed (${tokenResponse.status}): ${detail}`);
-  }
-
-  const tokenJson = await tokenResponse.json() as { access_token: string; expires_in?: number };
-  sheetsAccessTokenCache = {
-    token: tokenJson.access_token,
-    expiresAt: Date.now() + (tokenJson.expires_in || 3600) * 1000
-  };
-
-  return sheetsAccessTokenCache.token;
-}
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
@@ -98,48 +30,6 @@ if (apiKey && apiKey !== "MY_GEMINI_API_KEY" && apiKey.trim() !== "") {
 } else {
   console.log("No valid Gemini API key detected. Running in robust Fallback Domain Simulation mode.");
 }
-
-app.get("/api/sheets/task-tracker", async (_req, res) => {
-  try {
-    const accessToken = await getAdminSheetsAccessToken();
-    const rows = await fetchTaskTrackerSheet(accessToken);
-
-    if (!rows || rows.length === 0) {
-      throw new Error("Task Tracker sheet returned no rows.");
-    }
-
-    taskTrackerCache = {
-      rows,
-      syncedAt: new Date().toISOString()
-    };
-
-    res.json({
-      success: true,
-      source: "google-sheets-admin",
-      cached: false,
-      syncedAt: taskTrackerCache.syncedAt,
-      rows
-    });
-  } catch (err: any) {
-    console.error("Backend Sheets sync failed:", err);
-
-    if (taskTrackerCache) {
-      return res.json({
-        success: true,
-        source: "google-sheets-admin-cache",
-        cached: true,
-        syncedAt: taskTrackerCache.syncedAt,
-        warning: err.message || "Live sheet sync failed; returning cached rows.",
-        rows: taskTrackerCache.rows
-      });
-    }
-
-    res.status(503).json({
-      success: false,
-      error: err.message || "Backend Sheets sync failed and no cached rows are available."
-    });
-  }
-});
 
 // 1. Root Cause Analysis endpoint
 app.post("/api/gemini/rca", async (req, res) => {

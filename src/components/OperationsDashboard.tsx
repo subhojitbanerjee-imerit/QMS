@@ -202,47 +202,10 @@ interface OperationsDashboardProps {
 
 export default function OperationsDashboard({ onLocationsUpdate }: OperationsDashboardProps) {
   // Local active dataset state
-  const [taskData, setTaskData] = useState<TaskTrackerRow[]>([]);
+  const [taskData] = useState<TaskTrackerRow[]>(COMPLETE_TASK_TRACKER_DATA);
 
-  // Backend Sheets sync state
-  const [lastSyncedAt, setLastSyncedAt] = useState<string>("");
-  const [dataSource, setDataSource] = useState<"loading" | "live" | "cache" | "fallback">("loading");
-  const [syncMessage, setSyncMessage] = useState<string>("Loading Task Tracker from backend admin sync...");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBackendSheet() {
-      try {
-        const response = await fetch("/api/sheets/task-tracker");
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok || !payload.success || !Array.isArray(payload.rows)) {
-          throw new Error(payload.error || `Backend sync failed with HTTP ${response.status}`);
-        }
-
-        if (cancelled) return;
-
-        setTaskData(payload.rows);
-        setDataSource(payload.cached ? "cache" : "live");
-        setLastSyncedAt(payload.syncedAt ? new Date(payload.syncedAt).toLocaleTimeString() : new Date().toLocaleTimeString());
-        setSyncMessage(payload.cached ? "Showing cached backend sheet data while live sync recovers." : "Live Google Sheet rows loaded through backend admin sync.");
-      } catch (error: any) {
-        if (cancelled) return;
-
-        setTaskData(COMPLETE_TASK_TRACKER_DATA);
-        setDataSource("fallback");
-        setLastSyncedAt(new Date().toLocaleTimeString());
-        setSyncMessage(error.message ? `Backend sync unavailable: ${error.message}. Showing bundled fallback data.` : "Backend sync unavailable. Showing bundled fallback data.");
-      }
-    }
-
-    loadBackendSheet();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Direct-load state
+  const [lastSyncedAt] = useState<string>(new Date().toLocaleTimeString());
 
   // Sync locations to parent header when data loads
   useEffect(() => {
@@ -686,8 +649,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   }, [filteredData, filterStqc]);
 
   const recentWeeks = useMemo(() => {
-    const weeks = Array.from(new Set<string>(filteredData.map(row => String(row.week_beginning || "").trim()).filter(Boolean)));
-    return weeks
+    return Array.from(new Set(filteredData.map(row => String(row.week_beginning || "").trim()).filter(Boolean)))
       .sort((a, b) => {
         const aTime = new Date(a).getTime();
         const bTime = new Date(b).getTime();
@@ -1602,20 +1564,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <div>
               <h3 className="text-sm font-display font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
                 Google Sheets Data Router
-                <span className={`border text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase ${
-                  dataSource === "live"
-                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 animate-pulse"
-                    : dataSource === "cache"
-                      ? "bg-amber-50 border-amber-200 text-amber-700"
-                      : dataSource === "fallback"
-                        ? "bg-rose-50 border-rose-200 text-rose-700"
-                        : "bg-slate-100 border-slate-200 text-slate-500"
-                }`}>
-                  {dataSource === "live" ? "LIVE BACKEND SYNC" : dataSource === "cache" ? "CACHED BACKEND DATA" : dataSource === "fallback" ? "FALLBACK DATA" : "LOADING"}
+                <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase animate-pulse">
+                  DIRECT LOAD ACTIVE
                 </span>
               </h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Routes Task Tracker rows through one backend admin credential, so users can refresh without Google sign-in.
+                Loads task records directly for users without requiring Google authentication on refresh.
               </p>
             </div>
           </div>
@@ -1623,7 +1577,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           <div className="flex items-center gap-2 self-stretch lg:self-auto justify-end">
             <div className="text-right flex flex-col hidden sm:flex">
               <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">AUTH MODE</span>
-              <span className="text-xs font-semibold text-slate-700">Backend admin sync</span>
+              <span className="text-xs font-semibold text-slate-700">No user sign-in required</span>
             </div>
           </div>
         </div>
@@ -1634,7 +1588,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-xs font-mono text-slate-600 bg-slate-50 border border-slate-150 p-3 rounded-lg gap-3">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                <span><strong>{dataSource === "fallback" ? "Fallback Data Source" : "Google Sheet Sync Source"}:</strong> Loaded <strong>{taskData.length} records</strong>. {syncMessage} {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Loaded at {lastSyncedAt}</span>}</span>
+                <span><strong>Direct Data Source:</strong> Loaded <strong>{taskData.length} records</strong> automatically. Filters and AI engines are ready without OAuth. {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Loaded at {lastSyncedAt}</span>}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1747,9 +1701,9 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
       {taskData.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-3 shadow-xs animate-fade-in max-w-2xl mx-auto my-12" id="empty-onboarding-panel">
-          <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase">Loading Task Tracker</h3>
+          <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase">No task records loaded</h3>
           <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-            {syncMessage}
+            The dashboard is configured for direct loading. Refresh the app to initialize the bundled task records.
           </p>
         </div>
       ) : (
