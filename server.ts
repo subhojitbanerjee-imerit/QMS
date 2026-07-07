@@ -79,12 +79,18 @@ async function fetchSheetRows(sheetName: string): Promise<string[][]> {
 
 async function fetchRoleLogins(): Promise<RoleLogin[]> {
   const rows = await fetchSheetRows("Roles");
-  return rows.slice(1)
+  const roles = rows.slice(1)
     .map((row) => ({
       email: String(row[0] || "").trim().toLowerCase(),
       password: String(row[1] || "").trim()
     }))
     .filter((entry) => entry.email && entry.password);
+
+  if (roles.length === 0) {
+    throw new Error('No usable email/password rows were found in the "Roles" tab. Confirm columns A and B are email and Pass, and that the sheet is readable by the backend.');
+  }
+
+  return roles;
 }
 
 function signSession(email: string): string {
