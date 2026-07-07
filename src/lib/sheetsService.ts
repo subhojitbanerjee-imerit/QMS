@@ -170,31 +170,11 @@ export const fetchRoles = async (accessToken: string): Promise<Record<string, st
   }
 };
 
-export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTrackerRow[]> {
-  try {
-    const encodedRange = encodeURIComponent(SHEET_NAME);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodedRange}?valueRenderOption=FORMATTED_VALUE`;
-    
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json"
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("Sheets service failed with HTTP status:", response.status, errorData);
-      throw new Error(errorData?.error?.message || `Google Sheets API returned error code ${response.status}`);
-    }
-
-    const json = await response.json();
-    const values: string[][] = json.values;
-
-    if (!values || values.length === 0) {
-      console.warn("Retrieved empty values array from Task Tracker sheet.");
-      return [];
-    }
+export function parseTaskTrackerValues(values: string[][]): TaskTrackerRow[] {
+  if (!values || values.length === 0) {
+    console.warn("Retrieved empty values array from Task Tracker sheet.");
+    return [];
+  }
 
     // Extract headers (first row) and normalize them for easy matching
     const rawHeaders = values[0];
@@ -423,7 +403,29 @@ export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTr
 
     (parsedData as any).headers = rawHeaders;
     console.log(`Successfully parsed ${parsedData.length} active rows from the Google Sheet Task Tracker.`);
-    return parsedData;
+  return parsedData;
+}
+
+export async function fetchTaskTrackerSheet(accessToken: string): Promise<TaskTrackerRow[]> {
+  try {
+    const encodedRange = encodeURIComponent(SHEET_NAME);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodedRange}?valueRenderOption=FORMATTED_VALUE`;
+    
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("Sheets service failed with HTTP status:", response.status, errorData);
+      throw new Error(errorData?.error?.message || `Google Sheets API returned error code ${response.status}`);
+    }
+
+    const json = await response.json();
+    return parseTaskTrackerValues(json.values);
   } catch (error: any) {
     console.error("Failed to map Google Sheet Task Tracker values:", error);
     throw error;

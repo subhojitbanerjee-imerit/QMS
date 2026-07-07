@@ -1,17 +1,154 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { parseTaskTrackerValues } from "./src/lib/sheetsService";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const SPREADSHEET_ID = "1KOOx8Qis_zu8zBO_yfLCCMdPTkPve6WkNL3pJkMXILk";
+const AUTH_SECRET = process.env.APP_AUTH_SECRET || process.env.GEMINI_API_KEY || "qms-local-dashboard-secret";
 
 app.use(express.json());
 
 export default app;
+
+type RoleLogin = {
+  email: string;
+  password: string;
+};
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        cell += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (char !== "\r") {
+      cell += char;
+    }
+  }
+
+  row.push(cell);
+  if (row.some((value) => value.trim() !== "")) rows.push(row);
+  return rows;
+}
+
+async function fetchSheetRows(sheetName: string): Promise<string[][]> {
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "text/csv,text/plain,*/*",
+      "User-Agent": "qms-dashboard"
+    }
+  });
+
+  const text = await response.text();
+  if (!response.ok || text.trim().startsWith("<")) {
+    throw new Error(`Could not read the "${sheetName}" tab. Make sure the Google Sheet is accessible to the deployed app.`);
+  }
+
+  return parseCsv(text);
+}
+
+async function fetchRoleLogins(): Promise<RoleLogin[]> {
+  const rows = await fetchSheetRows("Roles");
+  return rows.slice(1)
+    .map((row) => ({
+      email: String(row[0] || "").trim().toLowerCase(),
+      password: String(row[1] || "").trim()
+    }))
+    .filter((entry) => entry.email && entry.password);
+}
+
+function signSession(email: string): string {
+  const payload = Buffer.from(JSON.stringify({
+    email,
+    exp: Date.now() + 12 * 60 * 60 * 1000
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifySession(token: string | undefined): string | null {
+  try {
+    if (!token || !token.includes(".")) return null;
+    const [payload, signature] = token.split(".");
+    const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("base64url");
+    const signatureBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (signatureBuffer.length !== expectedBuffer.length) return null;
+    const valid = crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+    if (!valid) return null;
+
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { email: string; exp: number };
+    if (!session.email || Date.now() > session.exp) return null;
+    return session.email;
+  } catch {
+    return null;
+  }
+}
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "").trim();
+    const roles = await fetchRoleLogins();
+    const matchedRole = roles.find((role) => role.email === email && role.password === password);
+
+    if (!matchedRole) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    res.json({ email, token: signSession(email) });
+  } catch (error: any) {
+    console.error("Role login failed:", error);
+    res.status(500).json({ error: error.message || "Unable to validate login." });
+  }
+});
+
+app.get("/api/sheets/task-tracker", async (req, res) => {
+  try {
+    const authHeader = String(req.headers.authorization || "");
+    const email = verifySession(authHeader.startsWith("Bearer ") ? authHeader.slice(7) : undefined);
+    if (!email) {
+      return res.status(401).json({ error: "Please sign in again." });
+    }
+
+    const rows = await fetchSheetRows("Task Tracker");
+    const data = parseTaskTrackerValues(rows);
+    res.json({ data, headers: (data as any).headers || [], email });
+  } catch (error: any) {
+    console.error("Task Tracker fetch failed:", error);
+    res.status(500).json({ error: error.message || "Unable to load Task Tracker data." });
+  }
+});
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
@@ -310,6 +447,7 @@ Produce a comprehensive, rigorous certification audit report in Markdown format:
 async function bootstrap() {
   // Serve frontend assets / dev server integration
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
