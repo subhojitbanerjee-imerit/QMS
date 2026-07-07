@@ -71,7 +71,7 @@ async function fetchSheetRows(sheetName: string): Promise<string[][]> {
 
   const text = await response.text();
   if (!response.ok || text.trim().startsWith("<")) {
-    throw new Error(`Could not read the "${sheetName}" tab. Make sure the Google Sheet is accessible to the deployed app.`);
+    throw new Error(`Could not read the "${sheetName}" tab. Share the Google Sheet as "Anyone with the link can view", or publish the sheet to the web, then redeploy.`);
   }
 
   return parseCsv(text);
@@ -129,7 +129,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({ email, token: signSession(email) });
   } catch (error: any) {
     console.error("Role login failed:", error);
-    res.status(500).json({ error: error.message || "Unable to validate login." });
+    res.status(500).json({ error: error.message || "Unable to validate login from the Roles tab." });
   }
 });
 

@@ -1691,32 +1691,39 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleRoleLogin} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
-                <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={(event) => setLoginEmail(event.target.value)}
-                  placeholder="email"
-                  className="min-w-0 sm:w-56 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                  required
-                />
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(event) => setLoginPassword(event.target.value)}
-                  placeholder="password"
-                  className="min-w-0 sm:w-36 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={loadingSheets}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 transition cursor-pointer shadow-3xs disabled:bg-indigo-300"
-                >
-                  {loadingSheets ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
-                  <span>{loadingSheets ? "Signing in..." : "Sign In"}</span>
-                </button>
-              </form>
+              <div className="flex flex-col items-stretch gap-2 w-full lg:w-auto">
+                <form onSubmit={handleRoleLogin} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(event) => setLoginEmail(event.target.value)}
+                    placeholder="email"
+                    className="min-w-0 sm:w-56 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                    required
+                  />
+                  <input
+                    type="password"
+                    value={loginPassword}
+                    onChange={(event) => setLoginPassword(event.target.value)}
+                    placeholder="password"
+                    className="min-w-0 sm:w-36 bg-white border border-slate-200 text-slate-800 text-xs font-semibold px-3 py-2.5 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    disabled={loadingSheets}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-lg flex items-center justify-center gap-2 transition cursor-pointer shadow-3xs disabled:bg-indigo-300"
+                  >
+                    {loadingSheets ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserCheck className="w-3.5 h-3.5" />}
+                    <span>{loadingSheets ? "Signing in..." : "Sign In"}</span>
+                  </button>
+                </form>
+                {sheetsError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 font-semibold">
+                    {sheetsError}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -1724,7 +1731,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
         {/* Sync Status Info Row */}
         {sheetsError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
-            ⚠️ <strong>OAuth Sync Alert:</strong> {sheetsError}
+            <strong>Sheet Access Alert:</strong> {sheetsError}
           </div>
         )}
         
@@ -1898,6 +1905,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
               Initialize Local Sandbox Simulation
             </button>
           </form>
+          {sheetsError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700 font-semibold text-left">
+              {sheetsError}
+            </div>
+          )}
           <div className="border-t border-slate-100 pt-5 text-left space-y-2">
             <h4 className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">Linked Resource Configuration:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-150">
