@@ -7,10 +7,74 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const SPREADSHEET_ID = "1KOOx8Qis_zu8zBO_yfLCCMdPTkPve6WkNL3pJkMXILk";
+const TASK_TRACKER_SHEET_NAME = "Task Tracker";
+const TASK_TRACKER_CACHE_TTL_MS = 5 * 60 * 1000;
 
 app.use(express.json());
 
 export default app;
+
+let taskTrackerValuesCache: { values: string[][]; fetchedAt: number } | null = null;
+let taskTrackerValuesRequest: Promise<string[][]> | null = null;
+
+async function fetchTaskTrackerValues(accessToken: string): Promise<string[][]> {
+  const encodedRange = encodeURIComponent(TASK_TRACKER_SHEET_NAME);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodedRange}?valueRenderOption=FORMATTED_VALUE`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || `Google Sheets API returned error code ${response.status}`);
+  }
+
+  const json = await response.json();
+  return Array.isArray(json.values) ? json.values : [];
+}
+
+app.get("/api/sheets/task-tracker-cache", async (req, res) => {
+  try {
+    const authHeader = String(req.headers.authorization || "");
+    const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!accessToken) {
+      return res.status(401).json({ error: "Missing Google Sheets access token." });
+    }
+
+    if (taskTrackerValuesCache && Date.now() - taskTrackerValuesCache.fetchedAt < TASK_TRACKER_CACHE_TTL_MS) {
+      return res.json({
+        values: taskTrackerValuesCache.values,
+        cached: true,
+        cachedAt: taskTrackerValuesCache.fetchedAt
+      });
+    }
+
+    if (!taskTrackerValuesRequest) {
+      taskTrackerValuesRequest = fetchTaskTrackerValues(accessToken)
+        .then((values) => {
+          taskTrackerValuesCache = { values, fetchedAt: Date.now() };
+          return values;
+        })
+        .finally(() => {
+          taskTrackerValuesRequest = null;
+        });
+    }
+
+    const values = await taskTrackerValuesRequest;
+    res.json({
+      values,
+      cached: false,
+      cachedAt: taskTrackerValuesCache?.fetchedAt || Date.now()
+    });
+  } catch (error: any) {
+    console.error("Task Tracker cache fetch failed:", error);
+    res.status(500).json({ error: error.message || "Unable to load cached Task Tracker data." });
+  }
+});
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
