@@ -6,9 +6,20 @@
 Google Sheet  →  Apps Script (daily)  →  Native BQ table  →  QMS Dashboard
 ```
 
+- Uses **NEWLINE_DELIMITED_JSON** (not CSV) so `qcComment` free text with quotes/newlines loads cleanly
 - Table type stays **Table** (not External)
 - No manual CSV every day
 - No sharing Sheet with Vercel service account
+
+## Why not CSV?
+
+QC comments often contain `"`, commas, and line breaks. BigQuery CSV load then fails with:
+
+- `Missing close quote character`
+- `Data between close quote character and field separator`
+- errors on column `qcComment`
+
+JSON lines avoid that entirely.
 
 ## Target
 
@@ -36,6 +47,13 @@ Google Sheet  →  Apps Script (daily)  →  Native BQ table  →  QMS Dashboard
 9. Table **Details** must show type **Table**.
 10. **Triggers** → time-driven → function `syncTaskTrackerToBigQuery` (e.g. daily 6–7am).
 11. Dashboard: **Refresh BigQuery** after sync (or next morning after trigger).
+
+## If you still upload CSV manually (not recommended)
+
+- Prefer Apps Script above.
+- Or in Sheet: Data → clean `qcComment` (remove line breaks).
+- In BQ load options: enable **Allow quoted newlines**, quote all fields.
+- Free-text columns will keep causing CSV errors; NDJSON/script is safer.
 
 ## Vercel (dashboard only)
 
