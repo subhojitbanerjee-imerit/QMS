@@ -37,7 +37,9 @@ JSON lines avoid that entirely.
 3. Open the Task Tracker spreadsheet → **Extensions → Apps Script**.
 4. Paste contents of `SyncTaskTrackerToBigQuery.gs`.
 5. Set `CONFIG.SHEET_NAME` to the exact tab name.
-6. **Services (+)** → enable **BigQuery API**.
+6. Also add **`appsscript.json`** (Project Settings → Show `appsscript.json`, paste scopes file).
+   - Script uses **REST + UrlFetchApp** (no Advanced Service “BigQuery” required).
+   - First run will ask for BigQuery + Sheets permission.
 7. Run `runSyncNow` once → approve permissions.
 8. In BigQuery (processing location **US**):
    ```sql

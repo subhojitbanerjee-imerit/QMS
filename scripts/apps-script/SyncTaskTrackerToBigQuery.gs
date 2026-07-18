@@ -3,27 +3,18 @@
  * QMS: Google Sheet → BigQuery (native table) daily sync
  * =============================================================================
  *
- * Uses NEWLINE_DELIMITED_JSON (not CSV) so free-text columns like qcComment
- * can contain quotes, commas, and line breaks without breaking the load.
+ * Uses BigQuery REST API via UrlFetchApp (no Advanced Service required).
+ * Format: NEWLINE_DELIMITED_JSON load (safe for qcComment quotes/newlines).
  *
- * Target
- * ------
- * Project : gen-lang-client-0732074273
- * Dataset : qms_dashboard
- * Table   : task_tracker
- * Location: US
+ * Target: gen-lang-client-0732074273.qms_dashboard.task_tracker (location US)
  *
  * Setup
  * -----
- * 1) Dataset qms_dashboard in location US
- * 2) Your user: BigQuery Data Editor + Job User
- * 3) Extensions → Apps Script → paste this file
- * 4) Services (+) → add BigQuery API
- * 5) Set CONFIG.SHEET_NAME to exact tab name
- * 6) Run runSyncNow once → approve permissions
- * 7) Triggers → time-driven → syncTaskTrackerToBigQuery (daily)
- *
- * Do NOT use BigQuery "Create table from Drive/Sheets" (that is EXTERNAL).
+ * 1) Your Google user needs BigQuery Data Editor + Job User on the project
+ * 2) Sheet → Extensions → Apps Script → paste this file + appsscript.json
+ * 3) Set CONFIG.SHEET_NAME to exact tab name
+ * 4) Run runSyncNow once → approve OAuth
+ * 5) Triggers → time-driven → syncTaskTrackerToBigQuery
  * =============================================================================
  */
 
@@ -32,11 +23,10 @@ var CONFIG = {
   DATASET_ID: 'qms_dashboard',
   TABLE_ID: 'task_tracker',
   LOCATION: 'US',
-  /** Exact tab name at the bottom of the spreadsheet */
+  /** Exact tab name at bottom of spreadsheet */
   SHEET_NAME: 'Task Tracker',
   MAX_POLL_ATTEMPTS: 90,
   POLL_SLEEP_MS: 5000,
-  /** Optional email; leave '' to disable */
   NOTIFY_EMAIL: ''
 };
 
@@ -65,13 +55,13 @@ function syncTaskTrackerToBigQuery() {
   }
 }
 
-/** Manual test: select runSyncNow → Run */
+/** Manual test from editor */
 function runSyncNow() {
   return syncTaskTrackerToBigQuery();
 }
 
 // ---------------------------------------------------------------------------
-// Core load
+// Load via REST (no BigQuery advanced service)
 // ---------------------------------------------------------------------------
 
 function loadActiveSheetToBigQuery_() {
@@ -80,26 +70,46 @@ function loadActiveSheetToBigQuery_() {
   if (!sheet) {
     throw new Error(
       'Tab not found: "' + CONFIG.SHEET_NAME + '". ' +
-      'Set CONFIG.SHEET_NAME to the exact tab name at the bottom of the Sheet.'
+      'Set CONFIG.SHEET_NAME to the exact tab name.'
     );
   }
 
-  // getValues keeps types; we stringify safely for JSON.
   var values = sheet.getDataRange().getValues();
   if (!values || values.length < 2) {
-    throw new Error('Sheet "' + CONFIG.SHEET_NAME + '" needs a header row + at least 1 data row.');
+    throw new Error('Sheet needs a header row + at least 1 data row.');
   }
 
   var built = buildNdjson_(values);
   if (!built.ndjson) {
-    throw new Error('No data rows to load after cleaning headers.');
+    throw new Error('No data rows to load after reading the sheet.');
   }
 
-  var blob = Utilities.newBlob(built.ndjson, 'application/octet-stream', 'task_tracker_sync.ndjson');
+  // Multipart load job: metadata JSON + NDJSON body
+  var jobId = insertLoadJobNdjson_(built.ndjson, built.fieldNames);
+  Logger.log('Load job started: ' + jobId);
 
-  // Explicit schema (all STRING) avoids fragile CSV type inference and
-  // preserves free-text columns (qcComment, notes, etc.).
-  var schemaFields = built.fieldNames.map(function (name) {
+  var done = waitForJob_(jobId);
+  if (done.status && done.status.errorResult) {
+    throw new Error('BigQuery load failed: ' + JSON.stringify(done.status.errorResult));
+  }
+  if (done.status && done.status.errors && done.status.errors.length) {
+    Logger.log('Warnings: ' + JSON.stringify(done.status.errors).substring(0, 2000));
+  }
+
+  return {
+    jobId: jobId,
+    dataRows: built.dataRows,
+    fieldCount: built.fieldNames.length,
+    status: done.status && done.status.state
+  };
+}
+
+/**
+ * BigQuery Jobs.insert with media upload (NDJSON file).
+ * https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/insert
+ */
+function insertLoadJobNdjson_(ndjson, fieldNames) {
+  var schemaFields = fieldNames.map(function (name) {
     return { name: name, type: 'STRING', mode: 'NULLABLE' };
   });
 
@@ -123,34 +133,81 @@ function loadActiveSheetToBigQuery_() {
     }
   };
 
-  var inserted = BigQuery.Jobs.insert(jobResource, CONFIG.PROJECT_ID, blob);
-  if (!inserted || !inserted.jobReference || !inserted.jobReference.jobId) {
-    throw new Error('BigQuery.Jobs.insert returned no jobId. Enable Services → BigQuery API.');
+  var boundary = 'qms_boundary_' + new Date().getTime();
+  var metadata = JSON.stringify(jobResource);
+
+  // multipart/related: part1=job config, part2=file content
+  var body =
+    '--' + boundary + '\r\n' +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    metadata + '\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: application/octet-stream\r\n\r\n' +
+    ndjson + '\r\n' +
+    '--' + boundary + '--';
+
+  var url =
+    'https://www.googleapis.com/upload/bigquery/v2/projects/' +
+    encodeURIComponent(CONFIG.PROJECT_ID) +
+    '/jobs?uploadType=multipart';
+
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'multipart/related; boundary=' + boundary,
+    headers: {
+      Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
+    },
+    payload: body,
+    muteHttpExceptions: true
+  });
+
+  var code = resp.getResponseCode();
+  var text = resp.getContentText();
+  if (code < 200 || code >= 300) {
+    throw new Error('Jobs.insert failed HTTP ' + code + ': ' + text.substring(0, 1500));
   }
 
-  var jobId = inserted.jobReference.jobId;
-  Logger.log('NDJSON load job started: ' + jobId);
-
-  var done = waitForJob_(jobId);
-  if (done.status.errorResult) {
-    throw new Error('BigQuery load failed: ' + JSON.stringify(done.status.errorResult));
+  var json = JSON.parse(text);
+  if (!json.jobReference || !json.jobReference.jobId) {
+    throw new Error('Jobs.insert response missing jobId: ' + text.substring(0, 800));
   }
-  if (done.status.errors && done.status.errors.length) {
-    Logger.log('Job finished with warnings: ' + JSON.stringify(done.status.errors).substring(0, 2000));
-  }
-
-  return {
-    jobId: jobId,
-    dataRows: built.dataRows,
-    fieldCount: built.fieldNames.length,
-    status: done.status.state
-  };
+  return json.jobReference.jobId;
 }
 
-/**
- * Convert sheet grid → newline-delimited JSON.
- * Each line is one object: {"colA":"...","qcComment":"text with \"quotes\" and\nnewlines"}
- */
+function waitForJob_(jobId) {
+  var last = null;
+  for (var i = 0; i < CONFIG.MAX_POLL_ATTEMPTS; i++) {
+    Utilities.sleep(CONFIG.POLL_SLEEP_MS);
+    var url =
+      'https://bigquery.googleapis.com/bigquery/v2/projects/' +
+      encodeURIComponent(CONFIG.PROJECT_ID) +
+      '/jobs/' + encodeURIComponent(jobId) +
+      '?location=' + encodeURIComponent(CONFIG.LOCATION);
+
+    var resp = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+
+    var code = resp.getResponseCode();
+    var text = resp.getContentText();
+    if (code < 200 || code >= 300) {
+      throw new Error('Jobs.get failed HTTP ' + code + ': ' + text.substring(0, 1000));
+    }
+
+    last = JSON.parse(text);
+    var state = last.status && last.status.state;
+    Logger.log('Poll ' + (i + 1) + ': ' + state);
+    if (state === 'DONE') return last;
+  }
+  throw new Error('BigQuery job timed out. Check job (location US): ' + jobId);
+}
+
+// ---------------------------------------------------------------------------
+// Sheet → NDJSON
+// ---------------------------------------------------------------------------
+
 function buildNdjson_(values) {
   var rawHeaders = values[0];
   var fieldNames = [];
@@ -158,7 +215,6 @@ function buildNdjson_(values) {
 
   for (var c = 0; c < rawHeaders.length; c++) {
     var name = sanitizeFieldName_(rawHeaders[c], c);
-    // Deduplicate if two columns sanitize to the same name
     var base = name;
     var n = 2;
     while (used[name]) {
@@ -174,7 +230,6 @@ function buildNdjson_(values) {
 
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
-    // Skip completely empty rows
     var empty = true;
     for (var k = 0; k < row.length; k++) {
       if (row[k] !== '' && row[k] !== null && row[k] !== undefined) {
@@ -199,18 +254,13 @@ function buildNdjson_(values) {
   };
 }
 
-/** BigQuery field names: letters, numbers, underscores; start with letter/underscore */
 function sanitizeFieldName_(header, index) {
   var s = header === null || header === undefined ? '' : String(header);
-  s = s.replace(/^\uFEFF/, ''); // BOM
-  s = s.trim();
-  // Keep original-ish names the dashboard already aliases (spaces → _)
+  s = s.replace(/^\uFEFF/, '').trim();
   s = s.replace(/[^A-Za-z0-9_]/g, '_');
-  s = s.replace(/_+/g, '_');
-  s = s.replace(/^_+|_+$/g, '');
+  s = s.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
   if (!s) s = 'col_' + index;
   if (/^[0-9]/.test(s)) s = 'c_' + s;
-  // BigQuery max field name length 300
   if (s.length > 300) s = s.substring(0, 300);
   return s;
 }
@@ -218,27 +268,9 @@ function sanitizeFieldName_(header, index) {
 function cellToString_(value) {
   if (value === null || value === undefined) return '';
   if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-    // ISO-like local display without timezone gymnastics
     return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
   }
-  var s = String(value);
-  // Strip zero-width / bidi junk that often appears in pasted QC comments
-  s = s.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
-  return s;
-}
-
-function waitForJob_(jobId) {
-  var last = null;
-  for (var i = 0; i < CONFIG.MAX_POLL_ATTEMPTS; i++) {
-    Utilities.sleep(CONFIG.POLL_SLEEP_MS);
-    last = BigQuery.Jobs.get(CONFIG.PROJECT_ID, jobId, { location: CONFIG.LOCATION });
-    var state = last.status && last.status.state;
-    Logger.log('Poll ' + (i + 1) + ': ' + state);
-    if (state === 'DONE') return last;
-  }
-  throw new Error(
-    'BigQuery job timed out. Check job in console (location US): ' + jobId
-  );
+  return String(value).replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
 }
 
 function notify_(ok, body) {
