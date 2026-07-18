@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   COMPLETE_TASK_TRACKER_DATA,
   getOperationalMetrics,
@@ -56,9 +56,7 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { initAuth, googleSignIn, logout } from "../lib/firebaseAuth";
-import { appendDashboardAccessLog, fetchTaskTrackerSheet, fetchRoles } from "../lib/sheetsService";
-import { User } from "firebase/auth";
+import { fetchTaskTrackerSheet } from "../lib/sheetsService";
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
 const ALL_ADVANCED_WEEKS_KEY = "__all_weeks__";
@@ -210,16 +208,11 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
   // Local active dataset state
   const [taskData, setTaskData] = useState<TaskTrackerRow[]>([]);
 
-  // Google Sheets integration state
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  // BigQuery integration state
   const [loadingSheets, setLoadingSheets] = useState<boolean>(false);
   const [sheetsError, setSheetsError] = useState<string | null>(null);
-  const [logWarning, setLogWarning] = useState<string | null>(null);
   const [isSynced, setIsSynced] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const loggedAccessKeys = useRef<Set<string>>(new Set());
 
   const applyTaskRows = (sheetRows: TaskTrackerRow[], headers?: string[], syncedAt?: string) => {
     if (!sheetRows || sheetRows.length === 0) return false;
@@ -270,115 +263,31 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     }
   }, [taskData, onLocationsUpdate]);
 
-  const logDashboardAccess = async (accessToken: string, email?: string | null) => {
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    if (!normalizedEmail) return;
-
-    const logKey = `${normalizedEmail}:${new Date().toISOString().slice(0, 16)}`;
-    if (loggedAccessKeys.current.has(logKey)) return;
-
-    try {
-      await appendDashboardAccessLog(accessToken, normalizedEmail);
-      loggedAccessKeys.current.add(logKey);
-      setLogWarning(null);
-    } catch (error) {
-      console.warn("Dashboard access log append failed:", error);
-      const message = error instanceof Error ? error.message : "Unknown Log tab write error.";
-      setLogWarning(`Dashboard loaded, but Log tab was not updated: ${message}`);
-    }
-  };
-
-  // Listen to Firebase Auth state for caching and initial session load
-  useEffect(() => {
-    loadCachedTaskRows();
-
-    const unsubscribe = initAuth(
-      async (firebaseUser, cachedToken) => {
-        setUser(firebaseUser);
-        setToken(cachedToken);
-        setSheetsError(null);
-        try {
-          setLoadingSheets(true);
-          const sheetRows = await fetchTaskTrackerSheet(cachedToken);
-
-          if (applyTaskRows(sheetRows)) {
-            cacheTaskRows(sheetRows);
-          }
-
-          fetchRoles(cachedToken)
-            .then((rolesMap) => {
-              if (firebaseUser.email) {
-                const role = rolesMap[firebaseUser.email.toLowerCase()] || "Lead";
-                setUserRole(role);
-              }
-            })
-            .catch((error) => console.warn("Background role load failed:", error));
-
-          logDashboardAccess(cachedToken, firebaseUser.email);
-        } catch (err: any) {
-          console.error("Auto sheets load trigger failed:", err);
-          setSheetsError(err.message || "Failed to load Google Sheets row cells automatically.");
-        } finally {
-          setLoadingSheets(false);
-        }
-      },
-      () => {
-        setUser(null);
-        setToken(null);
-        setTaskData([]);
-        setIsSynced(false);
-        setUserRole(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  const handleConnectSheets = async () => {
+  const loadTaskTracker = async () => {
     setLoadingSheets(true);
     setSheetsError(null);
     try {
-      const result = await googleSignIn();
-      if (result) {
-        setUser(result.user);
-        setToken(result.accessToken);
-        
-        const sheetRows = await fetchTaskTrackerSheet(result.accessToken);
-
-        if (applyTaskRows(sheetRows)) {
-          cacheTaskRows(sheetRows);
-        } else {
-          setSheetsError("The linked Task Tracker sheet contains no metrics data rows.");
-        }
-
-        fetchRoles(result.accessToken)
-          .then((rolesMap) => {
-            if (result.user.email) {
-              const role = rolesMap[result.user.email.toLowerCase()] || "Lead";
-              setUserRole(role);
-            }
-          })
-          .catch((error) => console.warn("Background role load failed:", error));
-
-        logDashboardAccess(result.accessToken, result.user.email);
+      const rows = await fetchTaskTrackerSheet();
+      if (applyTaskRows(rows)) {
+        cacheTaskRows(rows);
+      } else {
+        setSheetsError("The BigQuery Task Tracker table contains no metrics data rows.");
       }
-    } catch (err: any) {
-      console.error("Failed to connect sheets via interactive click:", err);
-      setSheetsError(err.message || "Authentication or fetch failed.");
+    } catch (error) {
+      console.error("BigQuery Task Tracker load failed:", error);
+      setSheetsError(error instanceof Error ? error.message : "Failed to load Task Tracker data from BigQuery.");
     } finally {
       setLoadingSheets(false);
     }
   };
 
-  const handleDisconnectSheets = async () => {
-    await logout();
-    setUser(null);
-    setToken(null);
-    setTaskData([]);
-    setIsSynced(false);
-    setSheetsError(null);
-    setLogWarning(null);
-    if (typeof window !== "undefined") localStorage.removeItem(SHEET_CACHE_KEY);
-  };
+  // Show a recent local snapshot immediately, then refresh it from BigQuery.
+  useEffect(() => {
+    loadCachedTaskRows();
+    void loadTaskTracker();
+  }, []);
+
+  const handleConnectSheets = () => void loadTaskTracker();
 
   // Analytical Filters
   const [selectedLocation, setSelectedLocation] = useState<string[]>(["All"]);
@@ -1722,38 +1631,24 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             </div>
             <div>
               <h3 className="text-sm font-display font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
-                Google Sheets Live Sync Router
+                BigQuery Task Tracker Stream
                 {isSynced ? (
                   <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase animate-pulse">
                     LIVE CONNECTION ACTIVE
                   </span>
                 ) : (
                   <span className="bg-slate-100 border border-slate-200 text-slate-500 text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase">
-                    OFFLINE SANDBOX MODE
+                    CONNECTION UNAVAILABLE
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Routes live task records from designated Google Sheet: <code className="bg-slate-50 px-1 py-0.5 text-[10px] font-mono border border-slate-200 rounded text-indigo-600">ID: 1KOOx8Qis...</code> ("Task Tracker" tab).
+                Loads the scheduled Task Tracker warehouse copy securely through the dashboard backend.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 self-stretch lg:self-auto justify-end">
-            {isSynced ? (
-              <div className="flex items-center gap-3">
-                <div className="text-right flex flex-col hidden sm:flex">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">CONNECTED USER</span>
-                  <span className="text-xs font-semibold text-slate-700">{user?.email}</span>
-                </div>
-                <button
-                  onClick={handleDisconnectSheets}
-                  className="bg-white border border-red-250 hover:bg-red-50 text-red-650 font-bold text-xs px-4 py-2 rounded-lg transition cursor-pointer shadow-3xs"
-                >
-                  Disconnect Sheet
-                </button>
-              </div>
-            ) : (
               <button
                 onClick={handleConnectSheets}
                 disabled={loadingSheets}
@@ -1762,31 +1657,24 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
                 {loadingSheets ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Connecting via OAuth...</span>
+                    <span>Refreshing BigQuery...</span>
                   </>
                 ) : (
                   <>
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z" />
                     </svg>
-                    <span>Authorize & Link Google Sheet</span>
+                    <span>{isSynced ? "Refresh BigQuery" : "Retry BigQuery"}</span>
                   </>
                 )}
               </button>
-            )}
           </div>
         </div>
 
         {/* Sync Status Info Row */}
         {sheetsError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
-            ⚠️ <strong>OAuth Sync Alert:</strong> {sheetsError}
-          </div>
-        )}
-        
-        {logWarning && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 font-medium">
-            <strong>Log Alert:</strong> {logWarning}
+            <strong>BigQuery Sync Alert:</strong> {sheetsError}
           </div>
         )}
         
@@ -1795,7 +1683,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-xs font-mono text-slate-600 bg-slate-50 border border-slate-150 p-3 rounded-lg gap-3">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                <span><strong>Google Sheet Sync Source:</strong> Ingested <strong>{taskData.length} records</strong> dynamically. Filters and AI engines aligned with live sheet cells. {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Synced at {lastSyncedAt}</span>}</span>
+                <span><strong>BigQuery Source:</strong> Loaded <strong>{taskData.length} records</strong>. Filters and AI engines use the current warehouse snapshot. {lastSyncedAt && <span className="text-emerald-600 font-bold ml-2">Synced at {lastSyncedAt}</span>}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1924,7 +1812,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
           <div className="space-y-2">
             <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase">Live Operations Stream Offline</h3>
             <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-              This dashboard is strictly structured to parse and map dynamic operational telemetry directly from Google Sheets. To experience full telemetry, authorize the live sync router.
+              The dashboard could not load its Task Tracker warehouse data. Retry the secure BigQuery connection or use the local sandbox.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
@@ -1936,14 +1824,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
               {loadingSheets ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Authorizing via Google...</span>
+                  <span>Loading BigQuery...</span>
                 </>
               ) : (
                 <>
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z" />
                   </svg>
-                  <span>Authorize & Link Google Sheet</span>
+                  <span>Retry BigQuery</span>
                 </>
               )}
             </button>
@@ -1958,12 +1846,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <h4 className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">Linked Resource Configuration:</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-150">
               <div>
-                <span className="text-[10px] text-slate-400 font-bold block mb-0.5">SPREADSHEET ID</span>
-                <code className="text-indigo-600 text-[11px] font-bold">1KOOx8Qis_zu8zBO_yfLCCMdPTkPve6WkNL3pJkMXILk</code>
+                <span className="text-[10px] text-slate-400 font-bold block mb-0.5">WAREHOUSE DATASET</span>
+                <code className="text-indigo-600 text-[11px] font-bold">qms_dashboard</code>
               </div>
               <div>
-                <span className="text-[10px] text-slate-400 font-bold block mb-0.5">TARGET TAB SHEET</span>
-                <span className="text-emerald-700 font-bold">"Task Tracker"</span>
+                <span className="text-[10px] text-slate-400 font-bold block mb-0.5">TARGET TABLE</span>
+                <span className="text-emerald-700 font-bold">task_tracker</span>
               </div>
             </div>
           </div>

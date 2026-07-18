@@ -1,50 +1,74 @@
 import express from "express";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
+import { BigQuery } from "@google-cloud/bigquery";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
-const SPREADSHEET_ID = "1KOOx8Qis_zu8zBO_yfLCCMdPTkPve6WkNL3pJkMXILk";
-const TASK_TRACKER_SHEET_NAME = "Task Tracker";
 const TASK_TRACKER_CACHE_TTL_MS = 5 * 60 * 1000;
 
 app.use(express.json());
 
 export default app;
 
-let taskTrackerValuesCache: { values: string[][]; fetchedAt: number } | null = null;
-let taskTrackerValuesRequest: Promise<string[][]> | null = null;
+type TaskTrackerQueryResult = { values: string[][]; fetchedAt: number };
 
-async function fetchTaskTrackerValues(accessToken: string): Promise<string[][]> {
-  const encodedRange = encodeURIComponent(TASK_TRACKER_SHEET_NAME);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodedRange}?valueRenderOption=FORMATTED_VALUE`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json"
-    }
-  });
+let taskTrackerValuesCache: TaskTrackerQueryResult | null = null;
+let taskTrackerValuesRequest: Promise<TaskTrackerQueryResult> | null = null;
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `Google Sheets API returned error code ${response.status}`);
+function readServiceAccountCredentials() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+    || process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+    || process.env.GOOGLE_CREDENTIALS;
+  if (!raw) return undefined;
+
+  try {
+    const credentials = JSON.parse(raw);
+    if (credentials.private_key) credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+    return credentials;
+  } catch {
+    throw new Error("The Google service-account environment variable is not valid JSON.");
   }
+}
 
-  const json = await response.json();
-  return Array.isArray(json.values) ? json.values : [];
+function bigQueryCellToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object" && "value" in (value as Record<string, unknown>)) {
+    return String((value as Record<string, unknown>).value ?? "");
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> {
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+  const datasetId = process.env.BIGQUERY_DATASET_ID || "qms_dashboard";
+  const tableId = process.env.BIGQUERY_TABLE_ID || "task_tracker";
+  const location = process.env.BIGQUERY_LOCATION || "asia-south1";
+  if (!projectId) throw new Error("GOOGLE_CLOUD_PROJECT_ID is not configured.");
+
+  const bigquery = new BigQuery({ projectId, credentials: readServiceAccountCredentials() });
+  const table = bigquery.dataset(datasetId).table(tableId);
+  const [metadata] = await table.getMetadata();
+  const headers = (metadata.schema?.fields || []).map((field: { name: string }) => field.name);
+  if (!headers.length) throw new Error("The BigQuery Task Tracker table has no columns.");
+
+  const [rows] = await bigquery.query({
+    query: `SELECT * FROM \`${projectId}.${datasetId}.${tableId}\``,
+    location,
+    useLegacySql: false
+  });
+  const values = [headers, ...rows.map((row: Record<string, unknown>) =>
+    headers.map((header: string) => bigQueryCellToString(row[header]))
+  )];
+  return { values, fetchedAt: Date.now() };
 }
 
 app.get("/api/sheets/task-tracker-cache", async (req, res) => {
   try {
-    const authHeader = String(req.headers.authorization || "");
-    const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!accessToken) {
-      return res.status(401).json({ error: "Missing Google Sheets access token." });
-    }
-
     if (taskTrackerValuesCache && Date.now() - taskTrackerValuesCache.fetchedAt < TASK_TRACKER_CACHE_TTL_MS) {
       return res.json({
         values: taskTrackerValuesCache.values,
@@ -54,25 +78,25 @@ app.get("/api/sheets/task-tracker-cache", async (req, res) => {
     }
 
     if (!taskTrackerValuesRequest) {
-      taskTrackerValuesRequest = fetchTaskTrackerValues(accessToken)
-        .then((values) => {
-          taskTrackerValuesCache = { values, fetchedAt: Date.now() };
-          return values;
+      taskTrackerValuesRequest = fetchTaskTrackerValues()
+        .then((result) => {
+          taskTrackerValuesCache = result;
+          return result;
         })
         .finally(() => {
           taskTrackerValuesRequest = null;
         });
     }
 
-    const values = await taskTrackerValuesRequest;
+    const result = await taskTrackerValuesRequest;
     res.json({
-      values,
+      values: result.values,
       cached: false,
-      cachedAt: taskTrackerValuesCache?.fetchedAt || Date.now()
+      cachedAt: result.fetchedAt
     });
   } catch (error: any) {
-    console.error("Task Tracker cache fetch failed:", error);
-    res.status(500).json({ error: error.message || "Unable to load cached Task Tracker data." });
+    console.error("BigQuery Task Tracker fetch failed:", error);
+    res.status(500).json({ error: error.message || "Unable to load Task Tracker data from BigQuery." });
   }
 });
 
