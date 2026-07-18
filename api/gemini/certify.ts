@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { handleGeminiRoute } from "../../src/server/geminiHandlers";
+import { handleGeminiRoute } from "../_lib/geminiHandlers";
 
 export const config = { runtime: "nodejs", maxDuration: 60 };
 

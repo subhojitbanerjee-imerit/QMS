@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { getBigQueryConfig } from "../src/server/bigqueryTaskTracker";
+import { getBigQueryConfig } from "./_lib/bigquery";
 
 export const config = {
   runtime: "nodejs",
@@ -8,21 +8,21 @@ export const config = {
 
 export default function handler(_req: IncomingMessage, res: ServerResponse) {
   try {
-    const config = getBigQueryConfig();
+    const cfg = getBigQueryConfig();
     const missing: string[] = [];
-    if (!config.projectId) missing.push("GOOGLE_CLOUD_PROJECT_ID");
-    if (!config.hasServiceAccount) missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
+    if (!cfg.projectId) missing.push("GOOGLE_CLOUD_PROJECT_ID");
+    if (!cfg.hasServiceAccount) missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
 
     const body = {
       ok: missing.length === 0,
       missing,
       runtime: "api/health.ts",
       bigquery: {
-        projectId: config.projectId || null,
-        datasetId: config.datasetId,
-        tableId: config.tableId,
-        location: config.location,
-        hasServiceAccount: config.hasServiceAccount,
+        projectId: cfg.projectId || null,
+        datasetId: cfg.datasetId,
+        tableId: cfg.tableId,
+        location: cfg.location,
+        hasServiceAccount: cfg.hasServiceAccount,
         client: "rest+jwt"
       },
       message: missing.length

@@ -4,14 +4,13 @@ import {
   getBigQueryConfig,
   toErrorMessage,
   type TaskTrackerQueryResult
-} from "../../src/server/bigqueryTaskTracker";
+} from "../_lib/bigquery";
 
 export const config = {
   runtime: "nodejs",
   maxDuration: 60
 };
 
-// Simple per-isolate cache (warm invocations only).
 let cache: TaskTrackerQueryResult | null = null;
 let inFlight: Promise<TaskTrackerQueryResult> | null = null;
 const TTL_MS = 5 * 60 * 1000;
