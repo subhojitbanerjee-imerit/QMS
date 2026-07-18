@@ -12,11 +12,17 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-// Google Auth Provider setup with Sheets scope for reading dashboard data and writing access logs
+// Sheets-scoped provider (legacy sheet integrations)
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/spreadsheets");
 provider.setCustomParameters({
   prompt: "consent"
+});
+
+// Identity-only provider (access logging / dashboard gate)
+const identityProvider = new GoogleAuthProvider();
+identityProvider.setCustomParameters({
+  prompt: "select_account"
 });
 
 let isSigningIn = false;
@@ -24,10 +30,25 @@ let cachedAccessToken: string | null = typeof window !== "undefined" ? localStor
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 
+export type IdentityUser = {
+  email: string;
+  displayName: string;
+  uid: string;
+};
+
+export function isFirebaseConfigured(): boolean {
+  return Boolean(
+    firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+  );
+}
+
 function getConfiguredAuth(): Auth | null {
   if (auth) return auth;
 
-  if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId || !firebaseConfig.appId) {
+  if (!isFirebaseConfigured()) {
     return null;
   }
 
@@ -40,6 +61,58 @@ function getConfiguredAuth(): Auth | null {
     return null;
   }
 }
+
+/** Listen for identity session (email/profile only; no Sheets token required). */
+export const initIdentityAuth = (
+  onSignedIn?: (user: IdentityUser) => void,
+  onSignedOut?: () => void
+) => {
+  const configuredAuth = getConfiguredAuth();
+  if (!configuredAuth) {
+    if (onSignedOut) onSignedOut();
+    return () => {};
+  }
+
+  return onAuthStateChanged(configuredAuth, (user: User | null) => {
+    if (user?.email) {
+      if (onSignedIn) {
+        onSignedIn({
+          email: user.email,
+          displayName: user.displayName || user.email,
+          uid: user.uid
+        });
+      }
+    } else if (onSignedOut) {
+      onSignedOut();
+    }
+  });
+};
+
+/** Google sign-in for dashboard identity (no Sheets OAuth scope). */
+export const googleSignInIdentity = async (): Promise<IdentityUser | null> => {
+  const configuredAuth = getConfiguredAuth();
+  if (!configuredAuth) {
+    throw new Error(
+      "Firebase is not configured. Set VITE_FIREBASE_* env vars, or use the email form on the access screen."
+    );
+  }
+
+  try {
+    isSigningIn = true;
+    const result = await signInWithPopup(configuredAuth, identityProvider);
+    const user = result.user;
+    if (!user.email) {
+      throw new Error("Google account did not return an email address.");
+    }
+    return {
+      email: user.email,
+      displayName: user.displayName || user.email,
+      uid: user.uid
+    };
+  } finally {
+    isSigningIn = false;
+  }
+};
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,

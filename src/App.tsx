@@ -1,15 +1,13 @@
 import React, { useState } from "react";
 import OperationsDashboard from "./components/OperationsDashboard";
+import AccessGate from "./components/AccessGate";
 import {
   Sparkles,
-  Info,
   MapPin,
   Clock,
-  X,
 } from "lucide-react";
 
 export default function App() {
-  const [showNotification, setShowNotification] = useState(true);
   const [headerLocations, setHeaderLocations] = useState<string>("BRP • SLT • PUNE • HYDERABAD");
   const [currentTime, setCurrentTime] = useState<string>(new Date().toISOString().split("T")[0] + " UTC");
 
@@ -60,9 +58,11 @@ export default function App() {
       </header>
       {/* Primary Page Canvas */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full" id="root-portal-canvas">
-        <OperationsDashboard
-          onLocationsUpdate={(locs: string[]) => setHeaderLocations(locs.join(" • ").toUpperCase())}
-        />
+        <AccessGate>
+          <OperationsDashboard
+            onLocationsUpdate={(locs: string[]) => setHeaderLocations(locs.join(" • ").toUpperCase())}
+          />
+        </AccessGate>
       </main>
 
       <footer className="border-t border-slate-200 bg-white py-8 text-xs text-slate-500 font-mono text-center space-y-2 mt-auto" id="app-footer">
