@@ -1,8 +1,7 @@
 /**
- * Local-dev re-export. Vercel API routes import from `api/_lib/bigquery.ts`
- * (bundler-safe path under /api). Keep this file for server.ts / apiApp.
+ * BigQuery Task Tracker loader for Vercel/serverless.
+ * Uses BigQuery REST + Node crypto JWT (no @google-cloud gRPC).
  */
-export * from "../../api/_lib/bigquery";
 
 export type TaskTrackerQueryResult = { values: string[][]; fetchedAt: number };
 
@@ -52,17 +51,16 @@ export function readServiceAccountCredentials(): {
     || process.env.GOOGLE_CREDENTIALS;
   if (!raw) {
     throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_JSON is not configured. Add the full service-account JSON in Vercel → Project Settings → Environment Variables."
+      "GOOGLE_SERVICE_ACCOUNT_JSON is not configured. Add the full service-account JSON in Vercel Project Settings."
     );
   }
 
   let jsonText = raw.trim();
-  // Support base64-encoded JSON when Vercel mangles multiline private keys.
   if (!jsonText.startsWith("{")) {
     try {
       jsonText = Buffer.from(jsonText, "base64").toString("utf8");
     } catch {
-      // fall through to JSON.parse error
+      // fall through
     }
   }
 
@@ -93,7 +91,7 @@ function base64UrlJson(value: unknown): string {
 }
 
 async function getAccessToken(credentials: { client_email: string; private_key: string }): Promise<string> {
-  const crypto = await import("node:crypto");
+  const crypto = await import("crypto");
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const claimSet = {
@@ -138,7 +136,6 @@ async function getAccessToken(credentials: { client_email: string; private_key: 
 function bigQueryCellToString(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object" && value !== null && "v" in (value as Record<string, unknown>)) {
-    // REST row format: { v: "..." } or { v: { f: [...] } }
     return bigQueryCellToString((value as { v: unknown }).v);
   }
   if (typeof value === "object") return JSON.stringify(value);
@@ -159,7 +156,6 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
     "Content-Type": "application/json"
   };
 
-  // 1) Table schema → header row
   const tableUrl =
     `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}` +
     `/datasets/${encodeURIComponent(datasetId)}/tables/${encodeURIComponent(tableId)}`;
@@ -186,7 +182,6 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
     throw new Error(`The BigQuery table ${projectId}.${datasetId}.${tableId} has no columns.`);
   }
 
-  // 2) Run query job via jobs.query (synchronous)
   const queryUrl =
     `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}/queries`;
 
@@ -223,11 +218,10 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
 
   if (queryJson.jobComplete === false) {
     throw new Error(
-      `BigQuery query for ${projectId}.${datasetId}.${tableId} did not complete in time. Try narrowing the table or raising function maxDuration.`
+      `BigQuery query for ${projectId}.${datasetId}.${tableId} did not complete in time.`
     );
   }
 
-  // Prefer query response schema order when present
   const resultHeaders = (queryJson.schema?.fields || [])
     .map((field) => String(field.name || "").trim())
     .filter(Boolean);

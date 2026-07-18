@@ -4,7 +4,7 @@ import {
   getBigQueryConfig,
   toErrorMessage,
   type TaskTrackerQueryResult
-} from "../_lib/bigquery";
+} from "../_lib/bigquery.js";
 
 export const config = {
   runtime: "nodejs",

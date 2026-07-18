@@ -1,5 +1,5 @@
 ﻿import type { IncomingMessage, ServerResponse } from "http";
-import { toErrorMessage } from "./bigquery";
+import { toErrorMessage } from "./bigquery.js";
 
 type GeminiKind = "rca" | "coaching" | "drift" | "certify";
 

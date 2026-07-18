@@ -1,37 +1,28 @@
 import type { IncomingMessage, ServerResponse } from "http";
+import { getBigQueryConfig } from "./_lib/bigquery.js";
 
 export const config = {
   runtime: "nodejs",
   maxDuration: 10
 };
 
-/** Fully inlined so we can prove the function runtime works without shared imports. */
 export default function handler(_req: IncomingMessage, res: ServerResponse) {
   try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "";
-    const datasetId = process.env.BIGQUERY_DATASET_ID || "qms_dashboard";
-    const tableId = process.env.BIGQUERY_TABLE_ID || "task_tracker";
-    const location = process.env.BIGQUERY_LOCATION || "asia-south1";
-    const hasServiceAccount = Boolean(
-      process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-      || process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-      || process.env.GOOGLE_CREDENTIALS
-    );
-
+    const cfg = getBigQueryConfig();
     const missing: string[] = [];
-    if (!projectId) missing.push("GOOGLE_CLOUD_PROJECT_ID");
-    if (!hasServiceAccount) missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
+    if (!cfg.projectId) missing.push("GOOGLE_CLOUD_PROJECT_ID");
+    if (!cfg.hasServiceAccount) missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
 
     const body = {
       ok: missing.length === 0,
       missing,
-      runtime: "api/health.ts-inline",
+      runtime: "api/health.ts",
       bigquery: {
-        projectId: projectId || null,
-        datasetId,
-        tableId,
-        location,
-        hasServiceAccount,
+        projectId: cfg.projectId || null,
+        datasetId: cfg.datasetId,
+        tableId: cfg.tableId,
+        location: cfg.location,
+        hasServiceAccount: cfg.hasServiceAccount,
         client: "rest+jwt"
       },
       message: missing.length
