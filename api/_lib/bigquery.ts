@@ -1,9 +1,18 @@
 /**
  * BigQuery Task Tracker loader for Vercel/serverless.
  * Uses BigQuery REST + Node crypto JWT (no @google-cloud gRPC).
+ *
+ * Full-table reads use tabledata.list with pageToken pagination so we do not
+ * silently drop rows after the first response page.
  */
 
-export type TaskTrackerQueryResult = { values: string[][]; fetchedAt: number };
+export type TaskTrackerQueryResult = {
+  values: string[][];
+  fetchedAt: number;
+  totalRows?: number;
+  fetchedRows?: number;
+  complete?: boolean;
+};
 
 export function toErrorMessage(error: unknown, fallback = "Unexpected server error"): string {
   if (error instanceof Error && error.message) return error.message;
@@ -142,8 +151,72 @@ function bigQueryCellToString(value: unknown): string {
   return String(value);
 }
 
+type BqTableDataRow = { f?: Array<{ v?: unknown }> };
+
+/**
+ * Page through tabledata.list until every row is collected.
+ * This is the reliable full-table path (jobs.query first page was truncating counts).
+ */
+async function listAllTableRows(
+  projectId: string,
+  datasetId: string,
+  tableId: string,
+  authHeaders: Record<string, string>,
+  expectedTotal?: number
+): Promise<BqTableDataRow[]> {
+  const pageSize = 10000;
+  const maxPages = 200; // hard stop: 2M rows
+  const allRows: BqTableDataRow[] = [];
+  let pageToken: string | undefined;
+  let page = 0;
+
+  do {
+    page += 1;
+    if (page > maxPages) {
+      throw new Error(
+        `BigQuery tabledata.list exceeded ${maxPages} pages while reading ${projectId}.${datasetId}.${tableId}. ` +
+        `Fetched ${allRows.length} rows so far.`
+      );
+    }
+
+    const url = new URL(
+      `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}` +
+      `/datasets/${encodeURIComponent(datasetId)}/tables/${encodeURIComponent(tableId)}/data`
+    );
+    url.searchParams.set("maxResults", String(pageSize));
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const res = await fetch(url.toString(), { headers: authHeaders });
+    const json = await res.json().catch(() => ({})) as {
+      rows?: BqTableDataRow[];
+      pageToken?: string;
+      totalRows?: string;
+      error?: { message?: string };
+    };
+
+    if (!res.ok) {
+      throw new Error(
+        `BigQuery tabledata.list failed for ${projectId}.${datasetId}.${tableId}: ` +
+        `${json.error?.message || `HTTP ${res.status}`}`
+      );
+    }
+
+    if (json.rows?.length) {
+      allRows.push(...json.rows);
+    }
+    pageToken = json.pageToken || undefined;
+
+    // Safety: if BigQuery reports a total and we reached it, stop even without pageToken glitches.
+    if (expectedTotal && allRows.length >= expectedTotal) {
+      pageToken = undefined;
+    }
+  } while (pageToken);
+
+  return allRows;
+}
+
 export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> {
-  const { projectId, datasetId, tableId, location } = getBigQueryConfig();
+  const { projectId, datasetId, tableId } = getBigQueryConfig();
   if (!projectId) {
     throw new Error("GOOGLE_CLOUD_PROJECT_ID is not configured in the server environment.");
   }
@@ -156,6 +229,7 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
     "Content-Type": "application/json"
   };
 
+  // 1) Schema + official row count from table metadata
   const tableUrl =
     `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}` +
     `/datasets/${encodeURIComponent(datasetId)}/tables/${encodeURIComponent(tableId)}`;
@@ -163,6 +237,7 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
   const tableRes = await fetch(tableUrl, { headers: authHeaders });
   const tableJson = await tableRes.json().catch(() => ({})) as {
     schema?: { fields?: Array<{ name?: string }> };
+    numRows?: string;
     error?: { message?: string; status?: string };
   };
 
@@ -182,58 +257,35 @@ export async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> 
     throw new Error(`The BigQuery table ${projectId}.${datasetId}.${tableId} has no columns.`);
   }
 
-  const queryUrl =
-    `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}/queries`;
+  const totalRows = Number(tableJson.numRows || 0);
 
-  const queryRes = await fetch(queryUrl, {
-    method: "POST",
-    headers: authHeaders,
-    body: JSON.stringify({
-      query: `SELECT * FROM \`${projectId}.${datasetId}.${tableId}\``,
-      useLegacySql: false,
-      location,
-      timeoutMs: 45000,
-      maxResults: 100000
-    })
-  });
+  // 2) Full table dump with pagination (replaces single-page jobs.query)
+  const rows = await listAllTableRows(projectId, datasetId, tableId, authHeaders, totalRows || undefined);
 
-  const queryJson = await queryRes.json().catch(() => ({})) as {
-    rows?: Array<{ f?: Array<{ v?: unknown }> }>;
-    schema?: { fields?: Array<{ name?: string }> };
-    jobComplete?: boolean;
-    errors?: Array<{ message?: string }>;
-    error?: { message?: string };
-    totalRows?: string;
-  };
-
-  if (!queryRes.ok || queryJson.error || (queryJson.errors && queryJson.errors.length)) {
-    const detail =
-      queryJson.error?.message
-      || queryJson.errors?.[0]?.message
-      || `HTTP ${queryRes.status}`;
-    throw new Error(
-      `BigQuery query failed for ${projectId}.${datasetId}.${tableId} (location=${location}): ${detail}`
-    );
-  }
-
-  if (queryJson.jobComplete === false) {
-    throw new Error(
-      `BigQuery query for ${projectId}.${datasetId}.${tableId} did not complete in time.`
-    );
-  }
-
-  const resultHeaders = (queryJson.schema?.fields || [])
-    .map((field) => String(field.name || "").trim())
-    .filter(Boolean);
-  const finalHeaders = resultHeaders.length ? resultHeaders : headers;
-
-  const dataRows = (queryJson.rows || []).map((row) => {
+  const dataRows = rows.map((row) => {
     const cells = row.f || [];
-    return finalHeaders.map((_, index) => bigQueryCellToString(cells[index]));
+    return headers.map((_, index) => bigQueryCellToString(cells[index]));
   });
+
+  const fetchedRows = dataRows.length;
+  const complete = !totalRows || fetchedRows >= totalRows;
+
+  if (!complete) {
+    console.warn(
+      `BigQuery partial read for ${projectId}.${datasetId}.${tableId}: fetched ${fetchedRows} of ${totalRows} rows.`
+    );
+  } else {
+    console.log(
+      `BigQuery full read for ${projectId}.${datasetId}.${tableId}: ${fetchedRows} rows` +
+      (totalRows ? ` (table numRows=${totalRows})` : "")
+    );
+  }
 
   return {
-    values: [finalHeaders, ...dataRows],
-    fetchedAt: Date.now()
+    values: [headers, ...dataRows],
+    fetchedAt: Date.now(),
+    totalRows: totalRows || fetchedRows,
+    fetchedRows,
+    complete
   };
 }

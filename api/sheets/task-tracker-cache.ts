@@ -15,7 +15,21 @@ let cache: TaskTrackerQueryResult | null = null;
 let inFlight: Promise<TaskTrackerQueryResult> | null = null;
 const TTL_MS = 5 * 60 * 1000;
 
-export default async function handler(_req: IncomingMessage, res: ServerResponse) {
+function sendResult(res: ServerResponse, result: TaskTrackerQueryResult, cached: boolean) {
+  const rowCount = Math.max(0, result.values.length - 1);
+  res.statusCode = 200;
+  res.end(JSON.stringify({
+    values: result.values,
+    cached,
+    cachedAt: result.fetchedAt,
+    rowCount,
+    totalRows: result.totalRows ?? rowCount,
+    fetchedRows: result.fetchedRows ?? rowCount,
+    complete: result.complete !== false
+  }));
+}
+
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
 
@@ -40,15 +54,11 @@ export default async function handler(_req: IncomingMessage, res: ServerResponse
       return;
     }
 
-    if (cache && Date.now() - cache.fetchedAt < TTL_MS) {
-      res.statusCode = 200;
-      res.end(JSON.stringify({
-        values: cache.values,
-        cached: true,
-        cachedAt: cache.fetchedAt,
-        rowCount: Math.max(0, cache.values.length - 1)
-      }));
-      return;
+    const url = new URL(req.url || "/", "http://localhost");
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+
+    if (!forceRefresh && cache && Date.now() - cache.fetchedAt < TTL_MS) {
+      return sendResult(res, cache, true);
     }
 
     if (!inFlight) {
@@ -63,13 +73,7 @@ export default async function handler(_req: IncomingMessage, res: ServerResponse
     }
 
     const result = await inFlight;
-    res.statusCode = 200;
-    res.end(JSON.stringify({
-      values: result.values,
-      cached: false,
-      cachedAt: result.fetchedAt,
-      rowCount: Math.max(0, result.values.length - 1)
-    }));
+    return sendResult(res, result, false);
   } catch (error) {
     const message = toErrorMessage(error, "Unable to load Task Tracker data from BigQuery.");
     console.error("BigQuery Task Tracker fetch failed:", message);

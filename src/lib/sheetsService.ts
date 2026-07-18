@@ -493,10 +493,20 @@ function formatApiErrorPayload(payload: unknown, status: number): string {
   return `BigQuery API returned HTTP ${status}`;
 }
 
-export async function fetchTaskTrackerSheet(): Promise<TaskTrackerRow[]> {
+export type TaskTrackerFetchMeta = {
+  rowCount: number;
+  totalRows?: number;
+  fetchedRows?: number;
+  complete?: boolean;
+  cached?: boolean;
+};
+
+export async function fetchTaskTrackerSheet(options?: { refresh?: boolean }): Promise<TaskTrackerRow[]> {
   try {
-    const response = await fetch("/api/sheets/task-tracker-cache", {
-      headers: { Accept: "application/json" }
+    const qs = options?.refresh ? "?refresh=1" : "";
+    const response = await fetch(`/api/sheets/task-tracker-cache${qs}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store"
     });
 
     const rawText = await response.text();
@@ -510,11 +520,43 @@ export async function fetchTaskTrackerSheet(): Promise<TaskTrackerRow[]> {
     }
 
     if (response.ok) {
-      const json = (payload && typeof payload === "object") ? payload as { values?: string[][] } : null;
+      const json = (payload && typeof payload === "object")
+        ? payload as {
+          values?: string[][];
+          rowCount?: number;
+          totalRows?: number;
+          fetchedRows?: number;
+          complete?: boolean;
+          cached?: boolean;
+        }
+        : null;
       if (!json?.values || !Array.isArray(json.values)) {
         throw new Error("BigQuery API returned OK but no Task Tracker values array was present.");
       }
-      return parseTaskTrackerValues(json.values);
+
+      const parsed = parseTaskTrackerValues(json.values);
+      const meta: TaskTrackerFetchMeta = {
+        rowCount: json.rowCount ?? Math.max(0, json.values.length - 1),
+        totalRows: json.totalRows,
+        fetchedRows: json.fetchedRows,
+        complete: json.complete,
+        cached: json.cached
+      };
+      (parsed as any).__meta = meta;
+
+      if (meta.complete === false && meta.totalRows && meta.fetchedRows) {
+        console.warn(
+          `BigQuery partial load: fetched ${meta.fetchedRows} of ${meta.totalRows} warehouse rows.`
+        );
+      } else {
+        console.log(
+          `BigQuery load complete: ${meta.fetchedRows ?? meta.rowCount} rows` +
+          (meta.totalRows ? ` (table total ${meta.totalRows})` : "") +
+          (meta.cached ? " [server-cache]" : "")
+        );
+      }
+
+      return parsed;
     }
 
     throw new Error(formatApiErrorPayload(payload, response.status));

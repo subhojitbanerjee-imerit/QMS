@@ -61,7 +61,8 @@ import { fetchTaskTrackerSheet } from "../lib/sheetsService";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#6366f1", "#06b6d4"];
 const ALL_ADVANCED_WEEKS_KEY = "__all_weeks__";
 const ALL_ADVANCED_WEEKS_LABEL = "All Weeks";
-const SHEET_CACHE_KEY = "qms_task_tracker_cache_v1";
+// Bump cache key whenever the warehouse loader changes so browsers drop partial snapshots.
+const SHEET_CACHE_KEY = "qms_task_tracker_cache_v2_fullpage";
 const SHEET_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 function getQcTypeBucket(qcErrorType?: string): "Controllable" | "Uncontrollable" | null {
@@ -263,13 +264,21 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     }
   }, [taskData, onLocationsUpdate]);
 
-  const loadTaskTracker = async () => {
+  const loadTaskTracker = async (opts?: { refresh?: boolean }) => {
     setLoadingSheets(true);
     setSheetsError(null);
     try {
-      const rows = await fetchTaskTrackerSheet();
+      const rows = await fetchTaskTrackerSheet({ refresh: opts?.refresh });
+      const meta = (rows as any)?.__meta as
+        | { totalRows?: number; fetchedRows?: number; complete?: boolean }
+        | undefined;
       if (applyTaskRows(rows)) {
         cacheTaskRows(rows);
+        if (meta && meta.complete === false && meta.totalRows && meta.fetchedRows) {
+          setSheetsError(
+            `Partial warehouse load: ${meta.fetchedRows.toLocaleString()} of ${meta.totalRows.toLocaleString()} rows. Click Refresh BigQuery again.`
+          );
+        }
       } else {
         setSheetsError("The BigQuery Task Tracker table contains no metrics data rows.");
       }
@@ -303,7 +312,7 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
     void loadTaskTracker();
   }, []);
 
-  const handleConnectSheets = () => void loadTaskTracker();
+  const handleConnectSheets = () => void loadTaskTracker({ refresh: true });
 
   // Analytical Filters
   const [selectedLocation, setSelectedLocation] = useState<string[]>(["All"]);
