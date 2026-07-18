@@ -3,18 +3,14 @@
  * QMS: Google Sheet → BigQuery (native table) daily sync
  * =============================================================================
  *
- * Uses BigQuery REST API via UrlFetchApp (no Advanced Service required).
- * Format: NEWLINE_DELIMITED_JSON load (safe for qcComment quotes/newlines).
+ * Logging
+ * -------
+ * 1) Apps Script → Executions → open run → see step logs
+ * 2) Spreadsheet tab "QMS_Sync_Log" — history of OK / FAILED runs
+ * 3) Run showLastSyncStatus() to log last sheet-log row
  *
- * Target: gen-lang-client-0732074273.qms_dashboard.task_tracker (location US)
- *
- * Setup
- * -----
- * 1) Your Google user needs BigQuery Data Editor + Job User on the project
- * 2) Sheet → Extensions → Apps Script → paste this file + appsscript.json
- * 3) Set CONFIG.SHEET_NAME to exact tab name
- * 4) Run runSyncNow once → approve OAuth
- * 5) Triggers → time-driven → syncTaskTrackerToBigQuery
+ * Setup: paste this + appsscript.json, set SHEET_NAME, run runSyncNow
+ * Target: gen-lang-client-0732074273.qms_dashboard.task_tracker (US)
  * =============================================================================
  */
 
@@ -25,75 +21,159 @@ var CONFIG = {
   LOCATION: 'US',
   /** Exact tab name at bottom of spreadsheet */
   SHEET_NAME: 'Task Tracker',
+  /** Visible history tab (auto-created) */
+  LOG_SHEET_NAME: 'QMS_Sync_Log',
   MAX_POLL_ATTEMPTS: 90,
   POLL_SLEEP_MS: 5000,
+  /** Optional email; leave '' to disable */
   NOTIFY_EMAIL: ''
 };
 
+// In-memory step buffer for this run (also written to QMS_Sync_Log)
+var RUN_STEPS_ = [];
+
 function syncTaskTrackerToBigQuery() {
   var started = new Date();
+  RUN_STEPS_ = [];
+  logStep_('START', 'Sync started at ' + started.toISOString());
+  logStep_('CONFIG', 'Target ' + CONFIG.PROJECT_ID + '.' + CONFIG.DATASET_ID + '.' + CONFIG.TABLE_ID +
+    ' location=' + CONFIG.LOCATION + ' sheetTab=' + CONFIG.SHEET_NAME);
+
   try {
     var result = loadActiveSheetToBigQuery_();
+    var durationSec = Math.round((new Date().getTime() - started.getTime()) / 1000);
     var msg =
-      'QMS BigQuery sync OK\n' +
-      'Table: ' + CONFIG.PROJECT_ID + '.' + CONFIG.DATASET_ID + '.' + CONFIG.TABLE_ID + '\n' +
-      'Job: ' + result.jobId + '\n' +
-      'Data rows: ' + result.dataRows + '\n' +
-      'Fields: ' + result.fieldCount + '\n' +
-      'Started: ' + started.toISOString();
+      'QMS BigQuery sync OK | job=' + result.jobId +
+      ' | rows=' + result.dataRows +
+      ' | fields=' + result.fieldCount +
+      ' | durationSec=' + durationSec;
+
+    logStep_('SUCCESS', msg);
+    writeSheetLog_({
+      status: 'OK',
+      started: started,
+      finished: new Date(),
+      durationSec: durationSec,
+      jobId: result.jobId,
+      dataRows: result.dataRows,
+      fieldCount: result.fieldCount,
+      error: '',
+      steps: RUN_STEPS_.join(' | ')
+    });
+    notify_(true, msg + '\n\nSteps:\n' + RUN_STEPS_.join('\n'));
+    Logger.log('=== SYNC RESULT: OK ===');
     Logger.log(msg);
-    notify_(true, msg);
     return result;
   } catch (err) {
-    var fail =
-      'QMS BigQuery sync FAILED\n' +
-      String(err && err.message ? err.message : err) +
-      '\nStarted: ' + started.toISOString();
+    var durationSecFail = Math.round((new Date().getTime() - started.getTime()) / 1000);
+    var errText = String(err && err.message ? err.message : err);
+    var fail = 'QMS BigQuery sync FAILED | ' + errText + ' | durationSec=' + durationSecFail;
+
+    logStep_('FAILED', errText);
+    writeSheetLog_({
+      status: 'FAILED',
+      started: started,
+      finished: new Date(),
+      durationSec: durationSecFail,
+      jobId: '',
+      dataRows: '',
+      fieldCount: '',
+      error: errText,
+      steps: RUN_STEPS_.join(' | ')
+    });
+    notify_(false, fail + '\n\nSteps:\n' + RUN_STEPS_.join('\n'));
+    Logger.log('=== SYNC RESULT: FAILED ===');
     Logger.log(fail);
-    notify_(false, fail);
     throw err;
   }
 }
 
 /** Manual test from editor */
 function runSyncNow() {
+  Logger.log('runSyncNow() invoked by user');
   return syncTaskTrackerToBigQuery();
 }
 
+/**
+ * Quick check: prints last QMS_Sync_Log row to Executions log.
+ * Run this anytime to see if last sync worked.
+ */
+function showLastSyncStatus() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var logSheet = ss.getSheetByName(CONFIG.LOG_SHEET_NAME);
+  if (!logSheet || logSheet.getLastRow() < 2) {
+    Logger.log('No sync history yet. Run runSyncNow() first.');
+    return 'NO_HISTORY';
+  }
+  var lastRow = logSheet.getLastRow();
+  var headers = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
+  var values = logSheet.getRange(lastRow, 1, 1, logSheet.getLastColumn()).getValues()[0];
+  var summary = {};
+  for (var i = 0; i < headers.length; i++) {
+    summary[headers[i]] = values[i];
+  }
+  Logger.log('=== LAST SYNC STATUS ===');
+  Logger.log(JSON.stringify(summary, null, 2));
+  return summary;
+}
+
 // ---------------------------------------------------------------------------
-// Load via REST (no BigQuery advanced service)
+// Load via REST
 // ---------------------------------------------------------------------------
 
 function loadActiveSheetToBigQuery_() {
+  logStep_('SHEET', 'Opening spreadsheet and tab "' + CONFIG.SHEET_NAME + '"');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
   if (!sheet) {
     throw new Error(
-      'Tab not found: "' + CONFIG.SHEET_NAME + '". ' +
-      'Set CONFIG.SHEET_NAME to the exact tab name.'
+      'Tab not found: "' + CONFIG.SHEET_NAME + '". Set CONFIG.SHEET_NAME to the exact tab name.'
     );
   }
 
+  logStep_('SHEET', 'Reading data range…');
   var values = sheet.getDataRange().getValues();
+  logStep_('SHEET', 'Read grid rows=' + values.length + ' cols=' + (values[0] ? values[0].length : 0));
+
   if (!values || values.length < 2) {
     throw new Error('Sheet needs a header row + at least 1 data row.');
   }
 
+  logStep_('BUILD', 'Building NDJSON payload…');
   var built = buildNdjson_(values);
+  logStep_('BUILD', 'NDJSON ready dataRows=' + built.dataRows +
+    ' fields=' + built.fieldNames.length +
+    ' payloadChars=' + built.ndjson.length);
+
   if (!built.ndjson) {
     throw new Error('No data rows to load after reading the sheet.');
   }
 
-  // Multipart load job: metadata JSON + NDJSON body
+  logStep_('BQ_JOB', 'Submitting BigQuery load job (WRITE_TRUNCATE, NDJSON)…');
   var jobId = insertLoadJobNdjson_(built.ndjson, built.fieldNames);
-  Logger.log('Load job started: ' + jobId);
+  logStep_('BQ_JOB', 'Job accepted jobId=' + jobId);
 
+  logStep_('BQ_WAIT', 'Waiting for job DONE (poll every ' + (CONFIG.POLL_SLEEP_MS / 1000) + 's)…');
   var done = waitForJob_(jobId);
+
   if (done.status && done.status.errorResult) {
     throw new Error('BigQuery load failed: ' + JSON.stringify(done.status.errorResult));
   }
   if (done.status && done.status.errors && done.status.errors.length) {
-    Logger.log('Warnings: ' + JSON.stringify(done.status.errors).substring(0, 2000));
+    logStep_('BQ_WARN', 'Job DONE with row warnings count=' + done.status.errors.length);
+    Logger.log('Warnings sample: ' + JSON.stringify(done.status.errors).substring(0, 2000));
+  } else {
+    logStep_('BQ_WAIT', 'Job DONE with no errorResult');
+  }
+
+  // Optional: verify table row count via query (best-effort)
+  try {
+    var n = queryTableRowCount_();
+    if (n !== null) {
+      logStep_('VERIFY', 'BigQuery table row count after load = ' + n);
+    }
+  } catch (e) {
+    logStep_('VERIFY', 'Row-count check skipped: ' + e);
   }
 
   return {
@@ -104,10 +184,6 @@ function loadActiveSheetToBigQuery_() {
   };
 }
 
-/**
- * BigQuery Jobs.insert with media upload (NDJSON file).
- * https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/insert
- */
 function insertLoadJobNdjson_(ndjson, fieldNames) {
   var schemaFields = fieldNames.map(function (name) {
     return { name: name, type: 'STRING', mode: 'NULLABLE' };
@@ -135,8 +211,6 @@ function insertLoadJobNdjson_(ndjson, fieldNames) {
 
   var boundary = 'qms_boundary_' + new Date().getTime();
   var metadata = JSON.stringify(jobResource);
-
-  // multipart/related: part1=job config, part2=file content
   var body =
     '--' + boundary + '\r\n' +
     'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
@@ -151,6 +225,7 @@ function insertLoadJobNdjson_(ndjson, fieldNames) {
     encodeURIComponent(CONFIG.PROJECT_ID) +
     '/jobs?uploadType=multipart';
 
+  logStep_('BQ_JOB', 'POST Jobs.insert multipart bytes≈' + body.length);
   var resp = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'multipart/related; boundary=' + boundary,
@@ -163,6 +238,7 @@ function insertLoadJobNdjson_(ndjson, fieldNames) {
 
   var code = resp.getResponseCode();
   var text = resp.getContentText();
+  logStep_('BQ_JOB', 'Jobs.insert HTTP ' + code);
   if (code < 200 || code >= 300) {
     throw new Error('Jobs.insert failed HTTP ' + code + ': ' + text.substring(0, 1500));
   }
@@ -198,10 +274,109 @@ function waitForJob_(jobId) {
 
     last = JSON.parse(text);
     var state = last.status && last.status.state;
-    Logger.log('Poll ' + (i + 1) + ': ' + state);
+    // Log every poll so Executions list shows progress
+    logStep_('BQ_WAIT', 'Poll ' + (i + 1) + '/' + CONFIG.MAX_POLL_ATTEMPTS + ' state=' + state);
     if (state === 'DONE') return last;
   }
   throw new Error('BigQuery job timed out. Check job (location US): ' + jobId);
+}
+
+/** Best-effort COUNT(*) after load */
+function queryTableRowCount_() {
+  var sql =
+    'SELECT COUNT(*) AS n FROM `' +
+    CONFIG.PROJECT_ID + '.' + CONFIG.DATASET_ID + '.' + CONFIG.TABLE_ID + '`';
+
+  var body = {
+    query: sql,
+    useLegacySql: false,
+    location: CONFIG.LOCATION,
+    timeoutMs: 30000
+  };
+
+  var url =
+    'https://bigquery.googleapis.com/bigquery/v2/projects/' +
+    encodeURIComponent(CONFIG.PROJECT_ID) +
+    '/queries';
+
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  });
+
+  var code = resp.getResponseCode();
+  var text = resp.getContentText();
+  if (code < 200 || code >= 300) {
+    logStep_('VERIFY', 'COUNT query HTTP ' + code + ': ' + text.substring(0, 400));
+    return null;
+  }
+  var json = JSON.parse(text);
+  if (json.rows && json.rows[0] && json.rows[0].f && json.rows[0].f[0]) {
+    return json.rows[0].f[0].v;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Logging helpers
+// ---------------------------------------------------------------------------
+
+function logStep_(phase, message) {
+  var line = '[' + phase + '] ' + message;
+  RUN_STEPS_.push(line);
+  Logger.log(line);
+}
+
+function writeSheetLog_(row) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var logSheet = ss.getSheetByName(CONFIG.LOG_SHEET_NAME);
+    if (!logSheet) {
+      logSheet = ss.insertSheet(CONFIG.LOG_SHEET_NAME);
+      logSheet.appendRow([
+        'timestamp',
+        'status',
+        'started',
+        'finished',
+        'duration_sec',
+        'job_id',
+        'data_rows',
+        'field_count',
+        'error',
+        'steps'
+      ]);
+      logSheet.setFrozenRows(1);
+      logSheet.getRange(1, 1, 1, 10).setFontWeight('bold');
+    }
+
+    var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    logSheet.appendRow([
+      ts,
+      row.status,
+      row.started ? Utilities.formatDate(row.started, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '',
+      row.finished ? Utilities.formatDate(row.finished, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : '',
+      row.durationSec,
+      row.jobId,
+      row.dataRows,
+      row.fieldCount,
+      row.error,
+      // Keep steps readable but not huge
+      String(row.steps || '').substring(0, 45000)
+    ]);
+
+    // Keep last ~200 runs
+    var maxRows = 201;
+    if (logSheet.getLastRow() > maxRows) {
+      logSheet.deleteRows(2, logSheet.getLastRow() - maxRows);
+    }
+
+    Logger.log('Wrote status to sheet tab: ' + CONFIG.LOG_SHEET_NAME + ' → ' + row.status);
+  } catch (e) {
+    Logger.log('Could not write QMS_Sync_Log sheet: ' + e);
+  }
 }
 
 // ---------------------------------------------------------------------------
