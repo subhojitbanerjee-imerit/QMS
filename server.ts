@@ -5,6 +5,7 @@ import { BigQuery } from "@google-cloud/bigquery";
 import dotenv from "dotenv";
 
 dotenv.config();
+dotenv.config({ path: ".env.local" });
 
 const app = express();
 const PORT = 3000;
@@ -19,18 +20,77 @@ type TaskTrackerQueryResult = { values: string[][]; fetchedAt: number };
 let taskTrackerValuesCache: TaskTrackerQueryResult | null = null;
 let taskTrackerValuesRequest: Promise<TaskTrackerQueryResult> | null = null;
 
+/** Always return a human-readable string from unknown thrown values. */
+function toErrorMessage(error: unknown, fallback = "Unexpected server error"): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) return record.message;
+    if (record.error && typeof record.error === "object") {
+      const nested = record.error as Record<string, unknown>;
+      if (typeof nested.message === "string" && nested.message.trim()) return nested.message;
+    }
+    if (typeof record.errors === "object" && Array.isArray(record.errors) && record.errors[0]) {
+      const first = record.errors[0] as Record<string, unknown>;
+      if (typeof first.message === "string") return first.message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+function getBigQueryConfig() {
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "";
+  const datasetId = process.env.BIGQUERY_DATASET_ID || "qms_dashboard";
+  const tableId = process.env.BIGQUERY_TABLE_ID || "task_tracker";
+  const location = process.env.BIGQUERY_LOCATION || "asia-south1";
+  const hasServiceAccount = Boolean(
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+    || process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+    || process.env.GOOGLE_CREDENTIALS
+  );
+  return { projectId, datasetId, tableId, location, hasServiceAccount };
+}
+
 function readServiceAccountCredentials() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
     || process.env.GOOGLE_SERVICE_ACCOUNT_KEY
     || process.env.GOOGLE_CREDENTIALS;
-  if (!raw) return undefined;
+  if (!raw) {
+    throw new Error(
+      "GOOGLE_SERVICE_ACCOUNT_JSON is not configured. Add the full service-account JSON in Vercel → Project Settings → Environment Variables."
+    );
+  }
+
+  // Support base64-encoded JSON (useful when Vercel mangles multiline private keys).
+  let jsonText = raw.trim();
+  if (!jsonText.startsWith("{")) {
+    try {
+      jsonText = Buffer.from(jsonText, "base64").toString("utf8");
+    } catch {
+      // keep original and let JSON.parse fail with a clear message
+    }
+  }
 
   try {
-    const credentials = JSON.parse(raw);
-    if (credentials.private_key) credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+    const credentials = JSON.parse(jsonText);
+    if (credentials.private_key) {
+      credentials.private_key = String(credentials.private_key).replace(/\\n/g, "\n");
+    }
+    if (!credentials.client_email || !credentials.private_key) {
+      throw new Error("Service account JSON must include client_email and private_key.");
+    }
     return credentials;
-  } catch {
-    throw new Error("The Google service-account environment variable is not valid JSON.");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("client_email")) throw error;
+    throw new Error(
+      "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. Paste the full service-account key file contents (or base64-encode it) as one env var."
+    );
   }
 }
 
@@ -44,31 +104,93 @@ function bigQueryCellToString(value: unknown): string {
 }
 
 async function fetchTaskTrackerValues(): Promise<TaskTrackerQueryResult> {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-  const datasetId = process.env.BIGQUERY_DATASET_ID || "qms_dashboard";
-  const tableId = process.env.BIGQUERY_TABLE_ID || "task_tracker";
-  const location = process.env.BIGQUERY_LOCATION || "asia-south1";
-  if (!projectId) throw new Error("GOOGLE_CLOUD_PROJECT_ID is not configured.");
+  const { projectId, datasetId, tableId, location } = getBigQueryConfig();
+  if (!projectId) {
+    throw new Error("GOOGLE_CLOUD_PROJECT_ID is not configured in the server environment.");
+  }
 
-  const bigquery = new BigQuery({ projectId, credentials: readServiceAccountCredentials() });
+  const credentials = readServiceAccountCredentials();
+  const bigquery = new BigQuery({ projectId, credentials });
   const table = bigquery.dataset(datasetId).table(tableId);
-  const [metadata] = await table.getMetadata();
-  const headers = (metadata.schema?.fields || []).map((field: { name: string }) => field.name);
-  if (!headers.length) throw new Error("The BigQuery Task Tracker table has no columns.");
 
-  const [rows] = await bigquery.query({
-    query: `SELECT * FROM \`${projectId}.${datasetId}.${tableId}\``,
-    location,
-    useLegacySql: false
-  });
-  const values = [headers, ...rows.map((row: Record<string, unknown>) =>
-    headers.map((header: string) => bigQueryCellToString(row[header]))
-  )];
+  let headers: string[] = [];
+  try {
+    const [metadata] = await table.getMetadata();
+    headers = (metadata.schema?.fields || []).map((field: { name: string }) => field.name);
+  } catch (error) {
+    throw new Error(
+      `Unable to read BigQuery table ${projectId}.${datasetId}.${tableId}: ${toErrorMessage(error)}. ` +
+      "Confirm the dataset/table exist and the service account has roles/bigquery.dataViewer + roles/bigquery.jobUser."
+    );
+  }
+
+  if (!headers.length) {
+    throw new Error(`The BigQuery table ${projectId}.${datasetId}.${tableId} has no columns.`);
+  }
+
+  let rows: Record<string, unknown>[] = [];
+  try {
+    const [queryRows] = await bigquery.query({
+      query: `SELECT * FROM \`${projectId}.${datasetId}.${tableId}\``,
+      location,
+      useLegacySql: false
+    });
+    rows = queryRows as Record<string, unknown>[];
+  } catch (error) {
+    throw new Error(
+      `BigQuery query failed for ${projectId}.${datasetId}.${tableId} (location=${location}): ${toErrorMessage(error)}`
+    );
+  }
+
+  const values = [
+    headers,
+    ...rows.map((row) => headers.map((header) => bigQueryCellToString(row[header])))
+  ];
   return { values, fetchedAt: Date.now() };
 }
 
-app.get("/api/sheets/task-tracker-cache", async (req, res) => {
+// Lightweight readiness probe — does not call BigQuery.
+app.get("/api/health", (_req, res) => {
+  const config = getBigQueryConfig();
+  const missing: string[] = [];
+  if (!config.projectId) missing.push("GOOGLE_CLOUD_PROJECT_ID");
+  if (!config.hasServiceAccount) missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
+
+  res.status(missing.length ? 503 : 200).json({
+    ok: missing.length === 0,
+    missing,
+    bigquery: {
+      projectId: config.projectId || null,
+      datasetId: config.datasetId,
+      tableId: config.tableId,
+      location: config.location,
+      hasServiceAccount: config.hasServiceAccount
+    },
+    message: missing.length
+      ? `BigQuery is not configured. Missing: ${missing.join(", ")}`
+      : "BigQuery environment looks configured."
+  });
+});
+
+app.get("/api/sheets/task-tracker-cache", async (_req, res) => {
   try {
+    const config = getBigQueryConfig();
+    if (!config.projectId || !config.hasServiceAccount) {
+      const missing = [
+        !config.projectId ? "GOOGLE_CLOUD_PROJECT_ID" : null,
+        !config.hasServiceAccount ? "GOOGLE_SERVICE_ACCOUNT_JSON" : null
+      ].filter(Boolean);
+      return res.status(503).json({
+        error: `BigQuery is not configured on the server. Missing env: ${missing.join(", ")}. Set these in Vercel Project Settings → Environment Variables, then redeploy.`,
+        missing,
+        bigquery: {
+          datasetId: config.datasetId,
+          tableId: config.tableId,
+          location: config.location
+        }
+      });
+    }
+
     if (taskTrackerValuesCache && Date.now() - taskTrackerValuesCache.fetchedAt < TASK_TRACKER_CACHE_TTL_MS) {
       return res.json({
         values: taskTrackerValuesCache.values,
@@ -94,9 +216,16 @@ app.get("/api/sheets/task-tracker-cache", async (req, res) => {
       cached: false,
       cachedAt: result.fetchedAt
     });
-  } catch (error: any) {
-    console.error("BigQuery Task Tracker fetch failed:", error);
-    res.status(500).json({ error: error.message || "Unable to load Task Tracker data from BigQuery." });
+  } catch (error: unknown) {
+    const message = toErrorMessage(error, "Unable to load Task Tracker data from BigQuery.");
+    console.error("BigQuery Task Tracker fetch failed:", message, error);
+    res.status(500).json({
+      error: message,
+      // Always a string so the UI never renders [object Object]
+      details: typeof error === "object" && error !== null
+        ? toErrorMessage(error)
+        : String(error ?? "")
+    });
   }
 });
 

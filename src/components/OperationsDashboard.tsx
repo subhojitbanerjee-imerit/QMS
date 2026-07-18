@@ -275,7 +275,23 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
       }
     } catch (error) {
       console.error("BigQuery Task Tracker load failed:", error);
-      setSheetsError(error instanceof Error ? error.message : "Failed to load Task Tracker data from BigQuery.");
+      let message = "Failed to load Task Tracker data from BigQuery.";
+      if (error instanceof Error && error.message) {
+        message = error.message;
+      } else if (typeof error === "string" && error.trim()) {
+        message = error;
+      } else if (error && typeof error === "object") {
+        try {
+          message = JSON.stringify(error);
+        } catch {
+          message = "Failed to load Task Tracker data from BigQuery.";
+        }
+      }
+      // Guard against accidental object→string coercion in any nested path
+      if (message === "[object Object]") {
+        message = "BigQuery request failed with an unknown object error. Open /api/health and Vercel function logs for details.";
+      }
+      setSheetsError(message);
     } finally {
       setLoadingSheets(false);
     }
@@ -1673,8 +1689,14 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
 
         {/* Sync Status Info Row */}
         {sheetsError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
-            <strong>BigQuery Sync Alert:</strong> {sheetsError}
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium space-y-1">
+            <div>
+              <strong>BigQuery Sync Alert:</strong>{" "}
+              <span className="break-words whitespace-pre-wrap">{sheetsError}</span>
+            </div>
+            <p className="text-[10px] text-red-500/90 font-mono">
+              Tip: open <code className="font-bold">/api/health</code> to verify env vars, then check Vercel → Deployments → Functions logs.
+            </p>
           </div>
         )}
         
@@ -1814,6 +1836,12 @@ export default function OperationsDashboard({ onLocationsUpdate }: OperationsDas
             <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
               The dashboard could not load its Task Tracker warehouse data. Retry the secure BigQuery connection or use the local sandbox.
             </p>
+            {sheetsError && (
+              <div className="mt-3 mx-auto max-w-xl text-left bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700 font-medium break-words whitespace-pre-wrap">
+                <strong className="block mb-1 uppercase tracking-wide text-[10px] text-red-500">Last error</strong>
+                {sheetsError}
+              </div>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-2">
             <button

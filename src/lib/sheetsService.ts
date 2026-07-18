@@ -442,20 +442,85 @@ export function parseTaskTrackerValues(values: string[][]): TaskTrackerRow[] {
     return parsedData;
 }
 
+/** Turn any API error payload into a readable string (never "[object Object]"). */
+function formatApiErrorPayload(payload: unknown, status: number): string {
+  if (payload == null || payload === "") {
+    return `BigQuery API returned HTTP ${status} with an empty body. The serverless function may have crashed — check Vercel function logs and /api/health.`;
+  }
+
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    // Vercel HTML crash pages
+    if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+      if (/FUNCTION_INVOCATION_FAILED/i.test(trimmed)) {
+        return `Vercel serverless function crashed (FUNCTION_INVOCATION_FAILED, HTTP ${status}). Open Vercel → Deployments → Functions logs, and verify GOOGLE_CLOUD_PROJECT_ID + GOOGLE_SERVICE_ACCOUNT_JSON are set.`;
+      }
+      return `BigQuery API returned an HTML error page (HTTP ${status}). The backend function likely crashed during startup. Check Vercel logs and /api/health.`;
+    }
+    return trimmed;
+  }
+
+  if (typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+
+    if (typeof record.error === "string" && record.error.trim()) return record.error;
+
+    if (record.error && typeof record.error === "object") {
+      const nested = record.error as Record<string, unknown>;
+      if (typeof nested.message === "string" && nested.message.trim()) {
+        const code = typeof nested.code === "string" || typeof nested.code === "number"
+          ? ` [${nested.code}]`
+          : "";
+        return `${nested.message}${code}`;
+      }
+      try {
+        return JSON.stringify(nested);
+      } catch {
+        /* fall through */
+      }
+    }
+
+    if (typeof record.message === "string" && record.message.trim()) return record.message;
+    if (typeof record.details === "string" && record.details.trim()) return record.details;
+
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return `BigQuery API returned HTTP ${status}`;
+    }
+  }
+
+  return `BigQuery API returned HTTP ${status}`;
+}
+
 export async function fetchTaskTrackerSheet(): Promise<TaskTrackerRow[]> {
   try {
     const response = await fetch("/api/sheets/task-tracker-cache", {
       headers: { Accept: "application/json" }
     });
 
+    const rawText = await response.text();
+    let payload: unknown = null;
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        payload = rawText;
+      }
+    }
+
     if (response.ok) {
-      const json = await response.json();
+      const json = (payload && typeof payload === "object") ? payload as { values?: string[][] } : null;
+      if (!json?.values || !Array.isArray(json.values)) {
+        throw new Error("BigQuery API returned OK but no Task Tracker values array was present.");
+      }
       return parseTaskTrackerValues(json.values);
     }
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error || `BigQuery API returned error code ${response.status}`);
-  } catch (error: any) {
+
+    throw new Error(formatApiErrorPayload(payload, response.status));
+  } catch (error: unknown) {
     console.error("Failed to map BigQuery Task Tracker values:", error);
-    throw error;
+    if (error instanceof Error) throw error;
+    throw new Error(formatApiErrorPayload(error, 0));
   }
 }
