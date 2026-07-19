@@ -157,9 +157,6 @@ export default function AccessGate({ children }: Props) {
           </div>
           <div>
             <h2 className="text-lg font-display font-bold text-slate-900">Dashboard access</h2>
-            <p className="text-xs text-slate-500 font-medium">
-              Sign in so we can log who opened the QMS dashboard.
-            </p>
           </div>
         </div>
 
